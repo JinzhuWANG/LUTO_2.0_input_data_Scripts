@@ -3,14 +3,22 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import geopandas as gpd
 import numpy as np
-from scipy import ndimage as nd
 import numpy.ma as ma
-from dbfread import DBF
 import rasterio, matplotlib, h5py
+
+# xarray and dask
+import xarray as xr                
+import rioxarray as rxr             
+import dask
+import dask.array as da             
+
+from scipy import ndimage as nd
+from dbfread import DBF
 from rasterio import features
 from rasterio.fill import fillnodata
 from rasterio.warp import reproject
 from rasterio.enums import Resampling
+
 
 
 # Set some options
@@ -807,19 +815,16 @@ def get_bio_priority(bio_path:str, resampling: Resampling):
 
 zonpath = 'N:/Data-Master/Biodiversity/Environmental-suitability/Zonation/'
     
-for ssp in ['ssp126', 'ssp245', 'ssp370', 'ssp585', 'HCAS']: 
+for ssp in ['ssp126', 'ssp245', 'ssp370', 'ssp585']: 
     
     # Match the biodiversity prioritization to the NLUM mask
-    bio_path = zonpath + '/' + ssp + '/rankmap.tif'
-    if ssp == 'HCAS':
-        # HCAS is 0.25km resolution, so use 'average' to dowmsample it to 1km
-        dst_array_filled = get_bio_priority(bio_path, resampling = Resampling.average)  
-    else:
-        # Carla's bio data is 5km resolution, so use 'bilinear' to upsample it to 1km
-        dst_array_filled = get_bio_priority(bio_path, resampling = Resampling.bilinear)
+    bio_path = f"{zonpath}/{ssp}/rankmap.tif"
+
+    # Carla's bio data is 5km resolution, so use 'bilinear' to upsample it to 1km
+    dst_array_filled = get_bio_priority(bio_path, resampling = Resampling.bilinear)
     
     # Save the output to GeoTiff
-    with rasterio.open(zonpath + '/' + ssp + '/' + ssp + '_zonation_rank_1km.tif', 'w+', dtype = 'float32', nodata = 0, **meta) as dst:        
+    with rasterio.open(f"{zonpath}/{ssp}/{ssp}_zonation_rank_1km.tif", 'w+', dtype = 'float32', nodata = 0, **meta) as dst:        
         dst.write_band(1, dst_array_filled)
     
     # Flatten 2D array to 1D array of valid values only
@@ -829,6 +834,77 @@ for ssp in ['ssp126', 'ssp245', 'ssp370', 'ssp585', 'HCAS']:
     cell_df['BIODIV_PRIORITY_' + ssp.upper()] = dataFlat
 
 
+
+
+# ------------ Bio prioritization Using HCAS (https://data.csiro.au/collection/csiro%3A58717v6) ------------
+   
+# Read the HCAS data for year 2009, 2010, and 2011, then compute the mean
+HCAS_path = "N:/Data-Master/Habitat_condition_assessment_system/Data"
+HCAS_xr = [
+    rxr.open_rasterio(f'{HCAS_path}/HCAS_V.2.3/1.HCASv23_Habitat_Condition/HCAS23_HC_{year}.tif', chunks='auto', masked=True)
+    .squeeze('band')
+    .drop_vars('band')
+    .expand_dims(year=[year])
+    for year in [2009, 2010, 2011]
+]
+
+HCAS_xr = xr.combine_by_coords(HCAS_xr, combine_attrs="drop")
+HCAS_xr = HCAS_xr.mean('year')
+
+
+# Read the LUMAP data for year 2010, then reproject and resample to match HCAS
+''' The lumap_2010.tiff is taken from any LUTO output folder with RESFACTOR=1.
+'''
+lumap_1km_xr = rxr.open_rasterio(f'{HCAS_path}/Processed/lumap_2010.tiff', masked=True).squeeze('band').drop_vars('band')
+lumap_match_HCAS_xr = lumap_1km_xr.rio.reproject_match(HCAS_xr, resampling=Resampling.nearest).chunk(**HCAS_xr.chunksizes)
+
+
+# Mask the HCAS data to each land-use class
+HCAS_xr = [
+    HCAS_xr.where(lumap_match_HCAS_xr == i).expand_dims(lu=[int(i)])
+    for i in np.unique(lumap_1km_xr)
+    if not np.isnan(i)
+]
+HCAS_xr = xr.combine_by_coords(HCAS_xr, combine_attrs="drop")
+
+# Calculate the 10th, 25th, 50th, 75th, and 90th percentiles of HCAS for each grid cell
+percentiles =[10, 25, 50, 75, 90]
+
+'''
+`apply_ufunc` is a high-level function that is essentially 1) looping through the some dimension combinations 
+and 2) apply a target function to the sliced data based on `core dims`. You may find this very confusing, 
+refer to below documentation for more information.
+
+'https://docs.xarray.dev/en/stable/examples/apply_ufunc_vectorize_1d.html#Vectorization-with-np.vectorize'
+'''
+lu_p_xr = xr.apply_ufunc(
+    np.nanpercentile,
+    HCAS_xr,
+    input_core_dims=[['x', 'y']],       # data along these dimensions will be collapsed to collapsed_data
+    output_core_dims=[["percentile"]],  # the name for the new dimension after applying func to collapsed_data
+    kwargs={"q": percentiles},
+    dask='parallelized',                # enable parallelized computation
+    vectorize=True,                     # loop through the dimension combinations except the core dimensions
+    dask_gufunc_kwargs={'output_sizes': {'percentile': len(percentiles)},
+                        'allow_rechunk':True}
+)
+
+lu_p_xr = lu_p_xr.assign_coords(percentile=percentiles).compute()
+
+# Save the output to CSV
+HCAS_LUMAP_PERCENTILE_df = lu_p_xr.to_dataframe('HCAS_LUMAP_PERCENTILE').reset_index()
+HCAS_LUMAP_PERCENTILE_df = HCAS_LUMAP_PERCENTILE_df.pivot(index='lu', columns='percentile', values='HCAS_LUMAP_PERCENTILE')
+HCAS_LUMAP_PERCENTILE_df.columns.name = None
+HCAS_LUMAP_PERCENTILE_df.columns = ['PERCENTILE_' + str(i) for i in HCAS_LUMAP_PERCENTILE_df.columns]
+
+HCAS_LUMAP_PERCENTILE_df.to_csv(f"{HCAS_path}/Data/Processed/HCAS_LUMAP_PERCENTILE.csv")
+
+
+
+
+
+
+############## Sanity Check and Write to HDF5 ##############
 
 # Check that there are no NaNs in the entire dataset
 print('Number of grid cells =', cell_df.shape[0])
