@@ -897,7 +897,9 @@ HCAS_LUMAP_PERCENTILE_df = HCAS_LUMAP_PERCENTILE_df.pivot(index='lu', columns='p
 HCAS_LUMAP_PERCENTILE_df.columns.name = None
 HCAS_LUMAP_PERCENTILE_df.columns = ['PERCENTILE_' + str(i) for i in HCAS_LUMAP_PERCENTILE_df.columns]
 
-HCAS_LUMAP_PERCENTILE_df.to_csv(f"{HCAS_path}/Data/Processed/HCAS_LUMAP_PERCENTILE.csv")
+if os.path.exists(f"{HCAS_path}/Processed/HCAS_LUMAP_PERCENTILE.csv"):
+    os.remove(f"{HCAS_path}/Processed/HCAS_LUMAP_PERCENTILE.csv")
+HCAS_LUMAP_PERCENTILE_df.to_csv(f"{HCAS_path}/Processed/HCAS_LUMAP_PERCENTILE.csv")
 
 
 
