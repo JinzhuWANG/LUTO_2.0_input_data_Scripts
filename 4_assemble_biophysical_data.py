@@ -897,10 +897,34 @@ HCAS_LUMAP_PERCENTILE_df = HCAS_LUMAP_PERCENTILE_df.pivot(index='lu', columns='p
 HCAS_LUMAP_PERCENTILE_df.columns.name = None
 HCAS_LUMAP_PERCENTILE_df.columns = ['PERCENTILE_' + str(i) for i in HCAS_LUMAP_PERCENTILE_df.columns]
 
-if os.path.exists(f"{HCAS_path}/Processed/HCAS_LUMAP_PERCENTILE.csv"):
-    os.remove(f"{HCAS_path}/Processed/HCAS_LUMAP_PERCENTILE.csv")
-HCAS_LUMAP_PERCENTILE_df.to_csv(f"{HCAS_path}/Processed/HCAS_LUMAP_PERCENTILE.csv")
+if os.path.exists(f"{HCAS_path}/Processed/DCCEEW_HCAS_LUMAP_PERCENTILE.csv"):
+    os.remove(f"{HCAS_path}/Processed/DCCEEW_HCAS_LUMAP_PERCENTILE.csv")
+HCAS_LUMAP_PERCENTILE_df.to_csv(f"{HCAS_path}/Processed/DCCEEW_HCAS_LUMAP_PERCENTILE.csv")
 
+
+
+# ------------ National Connectivity Index (https://data.csiro.au/collection/csiro%3A58717v6) ------------
+
+NCI = rxr.open_rasterio(f'{HCAS_path}/HCAS_V.2.3/9.NCI/NCI2_HCAS23_2001_2018.tif', masked=True).squeeze('band').drop_vars('band')
+
+# Reproject and resample the NCI data to match HCAS; 250m --> 1km, so we use 'average' resampling
+NCI_reproj_NLUM = NCI.rio.reproject_match(lumap_1km_xr, resampling=Resampling.average)
+
+# Make sure NoData values are filled
+NCI_reproj_NLUM.data = fillnodata(
+    NCI_reproj_NLUM, 
+    ~np.isnan(NCI_reproj_NLUM), 
+    max_search_distance = 100.0)
+
+# Flatten 2D array to 1D array of valid values only
+NCI_1D_LUTO = (NCI_reproj_NLUM.data)[~np.isnan(lumap_1km_xr)]
+
+# Sanity check for NoData values
+if np.isnan(NCI_1D_LUTO).sum() > 0:
+    raise ValueError("There are still NoData values within the NLUM mask")
+else:
+    np.save(f"{HCAS_path}/Processed/DCCEEW_NCI.npy", NCI_1D_LUTO)
+    
 
 
 
