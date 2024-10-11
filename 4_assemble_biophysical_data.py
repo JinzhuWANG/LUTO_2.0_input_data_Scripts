@@ -837,7 +837,7 @@ for ssp in ['ssp126', 'ssp245', 'ssp370', 'ssp585']:
 
 
 
-# ------------ Bio prioritization using HCAS (https://data.csiro.au/collection/csiro%3A58717v6) ------------
+# ------------ Habitat Condition Assessment System [HCAS] data (https://data.csiro.au/collection/csiro%3A58717v6) ------------
 
 
 HCAS_path = "N:/Data-Master/Habitat_condition_assessment_system/Data"
@@ -869,9 +869,11 @@ with rasterio.open(f'{HCAS_path}/HCAS_v3.0/HCAS30_HCB_1988_2022.tif') as HCAS_sr
             np.where(lu_arr_math_HCAS == lu_code, HCAS_arr, np.nan),
             percentiles
         )
+  
         
 # Save the output to CSV
 HCAS_LUMAP_PERCENTILE_df = pd.DataFrame(HCAS_lumap_percentile).T
+HCAS_LUMAP_PERCENTILE_df.index.name = 'lu'
 HCAS_LUMAP_PERCENTILE_df.columns = percentiles
 HCAS_LUMAP_PERCENTILE_df.columns = ['PERCENTILE_' + str(i) for i in HCAS_LUMAP_PERCENTILE_df.columns]
 HCAS_LUMAP_PERCENTILE_df['USER_DEFINED'] = None
@@ -883,7 +885,7 @@ HCAS_LUMAP_PERCENTILE_df.to_csv(f"{HCAS_path}/Processed/HABITAT_CONDITION.csv")
 
 
 
-# ------------ National Connectivity Index (https://data.csiro.au/collection/csiro%3A58717v6) ------------
+# ------------ National Connectivity Index [NCI] (https://data.csiro.au/collection/csiro%3A58717v6) ------------
 
 NCI_reproj_NLUM = reproj_resample(
     f'{HCAS_path}/HCAS_v3.0/HCAS30_NCIB_1988_2022.tif',
@@ -894,7 +896,6 @@ NCI_reproj_NLUM = reproj_resample(
 
 # Save NCI to cell_df dataframe
 cell_df['DCCEEW_NCI'] = NCI_reproj_NLUM[NLUM_mask == 1]
-
 
 
 ############## Sanity Check and Write to HDF5 ##############
