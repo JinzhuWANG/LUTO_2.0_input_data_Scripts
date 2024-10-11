@@ -886,7 +886,7 @@ HCAS_LUMAP_PERCENTILE_df.to_csv(f"{HCAS_path}/Processed/HABITAT_CONDITION.csv")
 # ------------ National Connectivity Index (https://data.csiro.au/collection/csiro%3A58717v6) ------------
 
 NCI_reproj_NLUM = reproj_resample(
-    f'{HCAS_path}/HCAS_v3.0/HCAS30_HCB_1988_2022.tif',
+    f'{HCAS_path}/HCAS_v3.0/HCAS30_NCIB_1988_2022.tif',
     meta,
     resampling = Resampling.average,    # use 'average' resampling to downsample the NCI data (250m) to match NLUM (1km)
     fill_nodata = True
