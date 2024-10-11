@@ -6,12 +6,6 @@ import numpy as np
 import numpy.ma as ma
 import rasterio, matplotlib, h5py
 
-# xarray and dask
-import xarray as xr                
-import rioxarray as rxr             
-import dask
-import dask.array as da             
-
 from scipy import ndimage as nd
 from dbfread import DBF
 from rasterio import features
@@ -794,21 +788,26 @@ with rasterio.open('N:/Data-Master/Soils/Soil_erosion/Dataset_9s/SDR_key_outputs
 # 2) fill nodata using inverse distance weighted averaging and mask to NLUM, 
 # 3) save the output to GeoTiff, 
 # 4) flatten 2D array to 1D array of valid values only
-def get_bio_priority(bio_path:str, resampling: Resampling):
+def reproj_resample(from_raster_path:str, to_raster_meta=meta, resampling: Resampling=Resampling.nearest, fill_nodata:bool=True) -> np.ndarray:
     
-    with rasterio.open(bio_path) as src:
+    with rasterio.open(from_raster_path) as src:
         # Create an empty destination array 
-        dst_array = np.zeros((meta.get('height'), meta.get('width')), np.float32)
-        # Reproject/resample input raster to match NLUM mask (meta)
-        reproject(rasterio.band(src, 1), dst_array, dst_transform = meta.get('transform'), dst_crs = meta.get('crs'), resampling = resampling)
+        dst_array = np.zeros((to_raster_meta.get('height'), to_raster_meta.get('width')), np.float32)
+        # Reproject/resample input raster to match NLUM mask (to_raster_meta)
+        reproject(
+            rasterio.band(src, 1), 
+            dst_array, 
+            dst_transform = to_raster_meta.get('transform'), 
+            dst_crs = to_raster_meta.get('crs'), 
+            resampling = resampling)
         
     # Create mask for filling cells
     fill_mask = np.where(dst_array > 0, 1, 0)
     
-    # Fill nodata using inverse distance weighted averaging and mask to NLUM
-    dst_array_filled = fillnodata(dst_array, fill_mask, max_search_distance = 100.0) * NLUM_mask
+    # Fill nodata using inverse distance weighted averaging
+    dst_array = fillnodata(dst_array, fill_mask, max_search_distance = 100.0) if fill_nodata else dst_array
 
-    return dst_array_filled
+    return dst_array
 
 
 # ------------ Bio prioritization by Carla Archibald using Zonation ------------
@@ -821,7 +820,7 @@ for ssp in ['ssp126', 'ssp245', 'ssp370', 'ssp585']:
     bio_path = f"{zonpath}/{ssp}/rankmap.tif"
 
     # Carla's bio data is 5km resolution, so use 'bilinear' to upsample it to 1km
-    dst_array_filled = get_bio_priority(bio_path, resampling = Resampling.bilinear)
+    dst_array_filled = reproj_resample(bio_path, resampling = Resampling.bilinear)
     
     # Save the output to GeoTiff
     with rasterio.open(f"{zonpath}/{ssp}/{ssp}_zonation_rank_1km.tif", 'w+', dtype = 'float32', nodata = 0, **meta) as dst:        
@@ -836,97 +835,65 @@ for ssp in ['ssp126', 'ssp245', 'ssp370', 'ssp585']:
 
 
 
-# ------------ Bio prioritization Using HCAS (https://data.csiro.au/collection/csiro%3A58717v6) ------------
-   
-# Read the HCAS data for year 2009, 2010, and 2011, then compute the mean
+
+
+# ------------ Bio prioritization using HCAS (https://data.csiro.au/collection/csiro%3A58717v6) ------------
+
+
 HCAS_path = "N:/Data-Master/Habitat_condition_assessment_system/Data"
-HCAS_xr = [
-    rxr.open_rasterio(f'{HCAS_path}/HCAS_V.2.3/1.HCASv23_Habitat_Condition/HCAS23_HC_{year}.tif', chunks='auto', masked=True)
-    .squeeze('band')
-    .drop_vars('band')
-    .expand_dims(year=[year])
-    for year in [2009, 2010, 2011]
-]
-
-HCAS_xr = xr.combine_by_coords(HCAS_xr, combine_attrs="drop")
-HCAS_xr = HCAS_xr.mean('year')
-
-
-# Read the LUMAP data for year 2010, then reproject and resample to match HCAS
-''' The lumap_2010.tiff is taken from any LUTO output folder with RESFACTOR=1.
-'''
-lumap_1km_xr = rxr.open_rasterio(f'{HCAS_path}/Processed/lumap_2010.tiff', masked=True).squeeze('band').drop_vars('band')
-lumap_match_HCAS_xr = lumap_1km_xr.rio.reproject_match(HCAS_xr, resampling=Resampling.nearest).chunk(**HCAS_xr.chunksizes)
-
-
-# Mask the HCAS data to each land-use class
-HCAS_xr = [
-    HCAS_xr.where(lumap_match_HCAS_xr == i).expand_dims(lu=[int(i)])
-    for i in np.unique(lumap_1km_xr)
-    if not np.isnan(i)
-]
-HCAS_xr = xr.combine_by_coords(HCAS_xr, combine_attrs="drop")
-
-# Calculate the 10th, 25th, 50th, 75th, and 90th percentiles of HCAS for each grid cell
 percentiles =[10, 25, 50, 75, 90]
 
-'''
-`apply_ufunc` is a high-level function that is essentially 1) looping through the some dimension combinations 
-and 2) apply a target function to the sliced data based on `core dims`. You may find this very confusing, 
-refer to below documentation for more information.
 
-'https://docs.xarray.dev/en/stable/examples/apply_ufunc_vectorize_1d.html#Vectorization-with-np.vectorize'
-'''
-lu_p_xr = xr.apply_ufunc(
-    np.nanpercentile,
-    HCAS_xr,
-    input_core_dims=[['x', 'y']],       # data along these dimensions will be collapsed to collapsed_data
-    output_core_dims=[["percentile"]],  # the name for the new dimension after applying func to collapsed_data
-    kwargs={"q": percentiles},
-    dask='parallelized',                # enable parallelized computation
-    vectorize=True,                     # loop through the dimension combinations except the core dimensions
-    dask_gufunc_kwargs={'output_sizes': {'percentile': len(percentiles)},
-                        'allow_rechunk':True}
-)
+with rasterio.open(f'{HCAS_path}/HCAS_v3.0/HCAS30_HCB_1988_2022.tif') as HCAS_src:
+    
+    # Read the HCAS data
+    HCAS_arr = HCAS_src.read(1)
+    HCAS_meta = HCAS_src.meta.copy()
 
-lu_p_xr = lu_p_xr.assign_coords(percentile=percentiles).compute()
+    # Read the LUMAP data for year 2010, then reproject and resample it to match HCAS
+    lu_arr_math_HCAS = reproj_resample(
+        f'{HCAS_path}/Processed/lumap_2010.tiff',
+        HCAS_meta,
+        resampling = Resampling.nearest,     # use 'nearest' resampling to upsample the LUMAP data (1km) to match HCAS (250m)
+        fill_nodata = False                  # do not fill nodata when reprojecting LUMAP
+    )
 
+    # Calculate the percentiles
+    HCAS_lumap_percentile = {}
+    for lu_code in np.unique(lu_arr_math_HCAS):
+        # Skip if lu_code is NaN or negative
+        if np.isnan(lu_code) or lu_code < 0:
+            continue
+        # Calculate the percentiles
+        HCAS_lumap_percentile[lu_code] = np.nanpercentile(
+            np.where(lu_arr_math_HCAS == lu_code, HCAS_arr, np.nan),
+            percentiles
+        )
+        
 # Save the output to CSV
-HCAS_LUMAP_PERCENTILE_df = lu_p_xr.to_dataframe('HCAS_LUMAP_PERCENTILE').reset_index()
-HCAS_LUMAP_PERCENTILE_df = HCAS_LUMAP_PERCENTILE_df.pivot(index='lu', columns='percentile', values='HCAS_LUMAP_PERCENTILE')
-HCAS_LUMAP_PERCENTILE_df.columns.name = None
+HCAS_LUMAP_PERCENTILE_df = pd.DataFrame(HCAS_lumap_percentile).T
+HCAS_LUMAP_PERCENTILE_df.columns = percentiles
 HCAS_LUMAP_PERCENTILE_df.columns = ['PERCENTILE_' + str(i) for i in HCAS_LUMAP_PERCENTILE_df.columns]
+HCAS_LUMAP_PERCENTILE_df['USER_DEFINED'] = None
 
-if os.path.exists(f"{HCAS_path}/Processed/DCCEEW_HCAS_LUMAP_PERCENTILE.csv"):
-    os.remove(f"{HCAS_path}/Processed/DCCEEW_HCAS_LUMAP_PERCENTILE.csv")
-HCAS_LUMAP_PERCENTILE_df.to_csv(f"{HCAS_path}/Processed/DCCEEW_HCAS_LUMAP_PERCENTILE.csv")
+if os.path.exists(f"{HCAS_path}/Processed/HABITAT_CONDITION.csv"):
+    os.remove(f"{HCAS_path}/Processed/HABITAT_CONDITION.csv")
+    
+HCAS_LUMAP_PERCENTILE_df.to_csv(f"{HCAS_path}/Processed/HABITAT_CONDITION.csv")
 
 
 
 # ------------ National Connectivity Index (https://data.csiro.au/collection/csiro%3A58717v6) ------------
 
-NCI = rxr.open_rasterio(f'{HCAS_path}/HCAS_V.2.3/9.NCI/NCI2_HCAS23_2001_2018.tif', masked=True).squeeze('band').drop_vars('band')
+NCI_reproj_NLUM = reproj_resample(
+    f'{HCAS_path}/HCAS_v3.0/HCAS30_HCB_1988_2022.tif',
+    meta,
+    resampling = Resampling.average,    # use 'average' resampling to downsample the NCI data (250m) to match NLUM (1km)
+    fill_nodata = True
+)
 
-# Reproject and resample the NCI data to match HCAS; 250m --> 1km, so we use 'average' resampling
-NCI_reproj_NLUM = NCI.rio.reproject_match(lumap_1km_xr, resampling=Resampling.average)
-
-# Make sure NoData values are filled
-NCI_reproj_NLUM.data = fillnodata(
-    NCI_reproj_NLUM, 
-    ~np.isnan(NCI_reproj_NLUM), 
-    max_search_distance = 100.0)
-
-# Flatten 2D array to 1D array of valid values only
-NCI_1D_LUTO = (NCI_reproj_NLUM.data)[~np.isnan(lumap_1km_xr)]
-
-# Sanity check for NoData values
-if np.isnan(NCI_1D_LUTO).sum() > 0:
-    raise ValueError("There are still NoData values within the NLUM mask")
-else:
-    np.save(f"{HCAS_path}/Processed/DCCEEW_NCI.npy", NCI_1D_LUTO)
-    
-
-
+# Save NCI to cell_df dataframe
+cell_df['DCCEEW_NCI'] = NCI_reproj_NLUM[NLUM_mask == 1]
 
 
 
