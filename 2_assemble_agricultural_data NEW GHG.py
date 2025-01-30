@@ -80,10 +80,10 @@ cell_df.rename(columns = {'STE_CODE11': 'STE_ID', 'SA4_CODE11': 'SA4_ID'}, inpla
 ag_df = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210817/pfe_table_13082021.csv', low_memory = False).drop(columns = 'rev_notes')
 
 # Load livestock mapping data from CSIRO, drop some columns, downcast and save a lite version. Only need to do this once then load the lite version
-# lmap = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210910/lmap.csv', low_memory = False)
-# lmap = lmap.drop(columns = ['Unnamed: 0', 'ha_dairy', 'ha_pixel', 'no_sheep', 'Beef Cattle', 'Dairy Cattle', 'Sheep', 'heads_mapped_cum', 'SPREAD_colour'])
-# downcast(lmap)
-# lmap.to_hdf('N:/Data-Master/Profit_map/From_CSIRO/20210910/lmap.h5', key = 'lmap', mode = 'w', format = 't')
+lmap = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210910/lmap.csv', low_memory = False)
+lmap = lmap.drop(columns = ['Unnamed: 0', 'ha_dairy', 'ha_pixel', 'no_sheep', 'Beef Cattle', 'Dairy Cattle', 'Sheep', 'heads_mapped_cum', 'SPREAD_colour'])
+downcast(lmap)
+lmap.to_hdf('N:/Data-Master/Profit_map/From_CSIRO/20210910/lmap.h5', key = 'lmap', mode = 'w', format = 't')
 
 # Load livestock map lite version, column names and descriptions: N:/Data-Master/Profit_map/From_CSIRO/20210910/lmap_variable_names_description.docx
 lmap = pd.read_hdf('N:/Data-Master/Profit_map/From_CSIRO/20210910/lmap.h5')
@@ -624,27 +624,22 @@ print('Sheep - Corrcoeff AC_SHEEP AC_sheep = {:.4f}'.format(ludf_[['AC_SHEEP', '
                                 
 
 
-# # Check that we have data everywhere it's needed
-# ls = def_df.query('LU_ID == 31 or LU_ID == 34').groupby('SA2_ID', observed = True, as_index = False).agg(L_DAIRY = ('LU_DESC', 'count'))
-# ls['L_DAIRY'] = 1
-# ludf = ludf.merge(ls, how = 'left', on = 'SA2_ID')
-# ll1 = ludf.query('L_DAIRY == 1 and AC_DAIRY != AC_DAIRY')
+# Check that we have data everywhere it's needed
+ls = def_df.query('LU_ID == 31 or LU_ID == 34').groupby('SA2_ID', observed = True, as_index = False).agg(L_DAIRY = ('LU_DESC', 'count'))
+ls['L_DAIRY'] = 1
+ludf = ludf.merge(ls, how = 'left', on = 'SA2_ID')
+print(ludf.query('L_DAIRY == 1 and AC_DAIRY != AC_DAIRY'))
 
-# ls = def_df.query('LU_ID == 32 or LU_ID == 35').groupby('SA2_ID', observed = True, as_index = False).agg(L_BEEF = ('LU_DESC', 'count'))
-# ls['L_BEEF'] = 1
-# ludf = ludf.merge(ls, how = 'left', on = 'SA2_ID')
-# ll2 = ludf.query('L_BEEF == 1 and AC_BEEF != AC_BEEF')
+ls = def_df.query('LU_ID == 32 or LU_ID == 35').groupby('SA2_ID', observed = True, as_index = False).agg(L_BEEF = ('LU_DESC', 'count'))
+ls['L_BEEF'] = 1
+ludf = ludf.merge(ls, how = 'left', on = 'SA2_ID')
+print(ludf.query('L_BEEF == 1 and AC_BEEF != AC_BEEF'))
 
-# ls = def_df.query('LU_ID == 33 or LU_ID == 36').groupby('SA2_ID', observed = True, as_index = False).agg(L_SHEEP = ('LU_DESC', 'count'))
-# ls['L_SHEEP'] = 1
-# ludf = ludf.merge(ls, how = 'left', on = 'SA2_ID')
-# ll3 = ludf.query('L_SHEEP == 1 and AC_SHEEP != AC_SHEEP')
+ls = def_df.query('LU_ID == 33 or LU_ID == 36').groupby('SA2_ID', observed = True, as_index = False).agg(L_SHEEP = ('LU_DESC', 'count'))
+ls['L_SHEEP'] = 1
+ludf = ludf.merge(ls, how = 'left', on = 'SA2_ID')
+print(ludf.query('L_SHEEP == 1 and AC_SHEEP != AC_SHEEP'))
 
-# if ll1.empty & ll2.empty & ll3.empty:
-#     print('We have data everywhere its needed!')
-# else: 
-#     print('NaNs are present!')
-    
 
 # Downcast to save space
 downcast(ludf)
@@ -936,7 +931,7 @@ adf = adf.query("SPREAD_ID >= 5 and SPREAD_ID <= 25")
 print('Number of NaNs =', adf[adf.isna().any(axis = 1)].shape[0])
 
 # Check the NLUM vs ABS commodity area
-adf2 = adf[['SA2_ID', 'LU_DESC', 'IRRIGATION', 'CELL_HA', 'Area', 'Prod', 'Yield', 'WR']].copy()
+adf2 = adf[['SA2_ID', 'LU_DESC', 'IRRIGATION', 'CELL_HA', 'Area', 'Prod', 'Yield', 'WR']]
 
 # Calculate production per cell based on NLUM area and ABS-derived yields
 adf2.eval('Prod_NLUM = CELL_HA * Yield', inplace = True)
@@ -944,22 +939,22 @@ adf2.eval('WR_NLUM = CELL_HA * WR', inplace = True)
 adf2.eval('WR_ABS = Area * WR', inplace = True)
 
 # Aggregate to the level of SA2
-tmp = adf2.groupby(['SA2_ID', 'LU_DESC', 'IRRIGATION'], observed=True).agg(Area_NLUM = ('CELL_HA', 'sum'), 
-                                                                           Area_ABS = ('Area', 'first'),
-                                                                           Prod_NLUM = ('Prod_NLUM', 'sum'), 
-                                                                           Prod_ABS = ('Prod', 'first'),
-                                                                           WR_NLUM = ('WR_NLUM', 'sum'),
-                                                                           WR_ABS = ('WR_ABS', 'first')
-                                                                           )
+tmp = adf2.groupby(['SA2_ID', 'LU_DESC', 'IRRIGATION']).agg(Area_NLUM = ('CELL_HA', 'sum'), 
+                                                            Area_ABS = ('Area', 'first'),
+                                                            Prod_NLUM = ('Prod_NLUM', 'sum'), 
+                                                            Prod_ABS = ('Prod', 'first'),
+                                                            WR_NLUM = ('WR_NLUM', 'sum'),
+                                                            WR_ABS = ('WR_ABS', 'first')
+                                                            )
 
 # Aggregate SA2s to calculate sum over commodities and irrigation status
-tmp2 = tmp.groupby(['LU_DESC', 'IRRIGATION'], observed=True).agg(Area_NLUM = ('Area_NLUM', 'sum'), 
-                                                                 Area_ABS = ('Area_ABS', 'sum'),
-                                                                 Prod_NLUM = ('Prod_NLUM', 'sum'), 
-                                                                 Prod_ABS = ('Prod_ABS', 'sum'),
-                                                                 WR_NLUM = ('WR_NLUM', 'sum'), 
-                                                                 WR_ABS = ('WR_ABS', 'sum')
-                                                                 )
+tmp2 = tmp.groupby(['LU_DESC', 'IRRIGATION']).agg(Area_NLUM = ('Area_NLUM', 'sum'), 
+                                                  Area_ABS = ('Area_ABS', 'sum'),
+                                                  Prod_NLUM = ('Prod_NLUM', 'sum'), 
+                                                  Prod_ABS = ('Prod_ABS', 'sum'),
+                                                  WR_NLUM = ('WR_NLUM', 'sum'), 
+                                                  WR_ABS = ('WR_ABS', 'sum')
+                                                  )
 # Compare total NLUM vs ABS area, prductivity, and irrigation water requirement
 print(tmp2)
 print(tmp2.sum())
@@ -1114,9 +1109,8 @@ k_lim = n_lim * (k_uptk / n_uptk)
 ############################################################################################################################################
 
 ##################  Read in the CROPS EMISSIONS table, join to cell_df, and drop unwanted columns
-##################  NOTE: NEW DATA FROM CSIRO NOT USED DUE TO ERRORS IN GHG ESTIMATES AND MANY MISSING ROWS
+##################  CODE BLOCK USED TO TEST NEW DATA FROM CSIRO WHICH WAS ULTIMATELY NOT USED TO CREATE LUTO2 DATA
 
-"""
 # Read crops emissions data
 ghg_df = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20231124/T_GHG_by_SPREAD_SA2_2010_NLUM_Navarroetal_fix_pears_nuts_othernoncereal.csv')
 # ghg_df.drop(columns = ['track', 'AER_ID'], inplace = True)
@@ -1229,29 +1223,15 @@ c_ghg = c_ghg.drop(columns = [col for col in c_ghg.columns for suf in suffixes i
 
 # Check that all gaps are filled
 print('Number of NaNs =', c_ghg[c_ghg.isna().any(axis=1)].shape[0]) # Should be zero
-"""
+
 
 
 
 ##################  Read in the CROPS EMISSIONS table, join to cell_df, and drop unwanted columns
 
-
 # Read crops emissions data
 ghg_df = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210921/T_GHG_by_SPREAD_SA2_crops_2010_NLUM.csv')
 ghg_df.drop(columns = ['SA4_ID', 'STATE_ID', 'track'], inplace = True)
-
-# Read in the NLUM SA2 template to check for NaNs (this table has every combination of LU, irr/dry, and SA2)
-def_df = pd.read_hdf('N:/Data-Master/Profit_map/NLUM_SPREAD_LU_ID_Mapped_Concordance.h5')
-
-# Read cell_df file from disk to a new data frame for ag data with just the relevant columns
-lut = cell_df.groupby(['SA2_ID'], observed = True, as_index = False).agg(
-                    SA4_ID = ('SA4_ID', 'first'),
-                    STATE_ID = ('STE_ID', 'first')
-                    ).sort_values(by = 'SA2_ID')
-
-# Merge SA4 and STATE ID columns for gap filling
-def_df = def_df.query('5 <= LU_ID <= 25').merge(lut, how = 'left', on = 'SA2_ID')
-
 
 # Join to template and check for nodata. Note: they only occur in kgCO2e_crop_management for valid reasons so we set them to zero.
 c_ghg = def_df.query('5 <= LU_ID <= 25').merge(ghg_df, how = 'left', left_on = ['SA2_ID', 'LU_ID', 'IRRIGATION'], right_on = ['SA2_ID', 'SPREAD_ID', 'irrigation'])
@@ -1318,7 +1298,7 @@ def calc_crop_GHG_with_NEW_N2O(c_ghg):
                               'kgco2e_soil_N_applied': 'CO2E_KG_HA_SOIL'}, inplace = True)
     return c_ghg
 
-# Calculate GHG emissions using old data or new - ***note new N2O emissions data is missing many rows, old data is used***
+# Calculate GHG emissions using old data or new - ***note new N2O emissions data is missing many rows***
 c_ghg_with_STATE_ID = calc_crop_GHG_with_OLD_N2O(c_ghg)
 
 # Convert LU_DESC to Sentence case
@@ -1339,7 +1319,7 @@ c_ghg.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/
 
 # Read in the livestock emissions table and drop unwanted columns
 ghg_ls = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20231113/T_GHG_by_SPREAD_SA2_livestock_2010_NLUM_per_head.csv')
-ghg_ls.drop(columns = ['track', 'irrigation'], inplace = True) # Dropping irrigation because the data is a duplicate of dryland
+ghg_ls.drop(columns = ['track', 'irrigation'], inplace = True)
 ghg_ls.drop_duplicates(inplace = True, ignore_index = True)
 ghg_ls.loc[ghg_ls.query('SPREAD_Commodity == "Dairy Cattle"').index, 'SPREAD_Commodity'] = 'DAIRY'
 ghg_ls.loc[ghg_ls.query('SPREAD_Commodity == "Beef Cattle"').index, 'SPREAD_Commodity'] = 'BEEF'
@@ -1347,7 +1327,8 @@ ghg_ls.loc[ghg_ls.query('SPREAD_Commodity == "Sheep"').index, 'SPREAD_Commodity'
 
 # Re-order and rename columns
 ls_ghg = ghg_ls[['SA2_ID', 'SPREAD_Commodity', 'GHG_enteric_perHead', 'GHG_manure management_perHead', 'GHG_indirect leaching and runoff_perHead', 'GHG_dung and urine_perHead', 'GHG_Seed emissions_perHead', 'GHG_Fodder emissions_perHead', 'GHG_Fuel_perHead', 'GHG_Electricity_perHead']]
-ls_ghg = ls_ghg.rename(columns = {'GHG_enteric_perHead': 'CO2E_KG_HEAD_ENTERIC',
+ls_ghg = ls_ghg.rename(columns = {'irrigation': 'IRRIGATION', 
+                                  'GHG_enteric_perHead': 'CO2E_KG_HEAD_ENTERIC',
                                   'GHG_manure management_perHead': 'CO2E_KG_HEAD_MANURE_MGT',
                                   'GHG_indirect leaching and runoff_perHead': 'CO2E_KG_HEAD_IND_LEACH_RUNOFF',
                                   'GHG_dung and urine_perHead': 'CO2E_KG_HEAD_DUNG_URINE', 
@@ -1356,9 +1337,6 @@ ls_ghg = ls_ghg.rename(columns = {'GHG_enteric_perHead': 'CO2E_KG_HEAD_ENTERIC',
                                   'GHG_Fuel_perHead': 'CO2E_KG_HEAD_FUEL', 
                                   'GHG_Electricity_perHead': 'CO2E_KG_HEAD_ELEC'
                                   })
-
-# Sort in place
-ls_ghg = ls_ghg.sort_values(by = ['SA2_ID', 'SPREAD_Commodity'], ascending = True).reset_index(drop = True)
 
 # Calculate pivot table
 lvstk_ghg_sources = ['CO2E_KG_HEAD_ENTERIC', 'CO2E_KG_HEAD_MANURE_MGT', 'CO2E_KG_HEAD_IND_LEACH_RUNOFF', 'CO2E_KG_HEAD_DUNG_URINE', 'CO2E_KG_HEAD_SEED', 'CO2E_KG_HEAD_FODDER', 'CO2E_KG_HEAD_FUEL', 'CO2E_KG_HEAD_ELEC'].sort()
@@ -1435,13 +1413,12 @@ crop_ghg_sources = ['CO2E_KG_HA_CHEM_APPL',
                     'CO2E_KG_HA_SOWING']
 
 # Rearrange the table structure
-pivot_ghg = pd.pivot_table(c_ghg_with_STATE_ID,
-                           observed = False,
-                           values = crop_ghg_sources, 
-                           index = ['SA2_ID', 'SA4_ID', 'STATE_ID'],
-                           columns = ['LU_DESC', 'IRRIGATION'],
-                           aggfunc = 'first'
-                          ).sort_values(by = 'SA2_ID')
+pivot_ghg = pd.pivot_table(c_ghg_with_STATE_ID, 
+                      values = crop_ghg_sources, 
+                      index = ['SA2_ID', 'SA4_ID', 'STATE_ID'],
+                      columns = ['LU_DESC', 'IRRIGATION'],
+                      aggfunc = 'first'
+                     ).sort_values(by = 'SA2_ID')
 
 # Select irrigated hay to represent emissions from irrigated sown pasture
 irr_pasture_ghg = pivot_ghg.loc[:, (slice(None), 'Winter cereals', 1)]
@@ -1536,9 +1513,9 @@ p_ls.columns = p_ls.columns.to_flat_index()
 ls_t1 = ludf_skinny.merge(p_ls, how = 'left', on = 'SA2_ID')
 ls_t2 = ls_t1.merge(irr_pasture_ghg, how = 'left', on = 'SA2_ID')
 
-ls_t2['LVSTK_TCO2E'] = 0.0
-ls_t2['IRRPAS_TCO2E'] = 0.0
-ls_t2['TOTAL_TCO2E'] = 0.0
+ls_t2['LVSTK_TCO2E'] = 0
+ls_t2['IRRPAS_TCO2E'] = 0
+ls_t2['TOTAL_TCO2E'] = 0
 
 idx1 = ls_t2.query('SPREAD_id_mapped == 31').index 
 ls_t2.loc[idx1, 'LVSTK_TCO2E'] = ls_t2['YIELD_POT_DAIRY'] * (ls_t2[('DAIRY', 'CO2E_KG_HEAD_ENTERIC')] + ls_t2[('DAIRY', 'CO2E_KG_HEAD_MANURE_MGT')] + ls_t2[('DAIRY', 'CO2E_KG_HEAD_IND_LEACH_RUNOFF')] + ls_t2[('DAIRY', 'CO2E_KG_HEAD_DUNG_URINE')] + ls_t2[('DAIRY', 'CO2E_KG_HEAD_SEED')] + ls_t2[('DAIRY', 'CO2E_KG_HEAD_FODDER')] + ls_t2[('DAIRY', 'CO2E_KG_HEAD_FUEL')] + ls_t2[('DAIRY', 'CO2E_KG_HEAD_ELEC')]) / 1000

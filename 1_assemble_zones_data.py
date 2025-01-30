@@ -1,13 +1,15 @@
-import pandas as pd
-import matplotlib.pyplot as plt
-import geopandas as gpd
+
 import numpy as np
-from scipy import ndimage as nd
 import numpy.ma as ma
+import pandas as pd
+import geopandas as gpd
 import rasterio, matplotlib
-from rasterio import features
-from rasterio.warp import reproject
 import lidario as lio
+import matplotlib.pyplot as plt
+
+from scipy import ndimage as nd
+from rasterio import features
+
 
 # Set some options
 pd.set_option('display.width', 400)
@@ -811,135 +813,10 @@ with rasterio.open('N:/Data-Master/Water/Irrigation_areas/POTENTIAL_IRRIGATION_A
 # Flatten the SA2 2D array to 1D array of valid values only, add to cell_df dataframe
 cell_df['POTENTIAL_IRRIGATION_AREAS'] = raster_clipped[NLUM_mask]
 
-# Plot and print out data, check that there are no NaNs
-cell_df.info()
-print('Number of grid cells =', cell_df.shape[0])
-print('Number of NaNs =', cell_df[cell_df.isna().any(axis = 1)].shape[0])
 
 
 
 
-################################ Reproject NVIS Extant + Pre-European Major Vegetation Groups and Subgroups rasters, fill holes to match NLUM, save GeoTiff, join to cell_df dataframe
-
-# Reproject NVIS AIGRID to match NLUM using the 'meta' metadata and save to GeoTiff
-# with rasterio.open('N:/Data-Master/NVIS\GRID_NVIS6_0_AUST_EXT_MVG\aus6_0e_mvg\w001000.adf') as src:
-#     with rasterio.open('N:/Data-Master/NVIS\GRID_NVIS6_0_AUST_EXT_MVG\aus6_0e_mvg.tif', 'w+', dtype='int32', nodata='0', **meta) as dst:
-#         reproject(rasterio.band(src, 1), rasterio.band(dst, 1))
-#         dst_array = dst.read(1, masked = True)
-
-
-############## NVIS Extant Major Vegetation Groups
-
-with rasterio.open('N:/Data-Master/NVIS/GRID_NVIS6_0_AUST_EXT_MVG/aus6_0e_mvg/w001000.adf') as src:
-    dst_array = np.zeros((meta.get('height'), meta.get('width')), np.uint8)
-    reproject(rasterio.band(src, 1), dst_array, dst_transform = meta.get('transform'), dst_crs = meta.get('crs'))
-
-# Mask out nodata cells
-dst_array = ma.masked_where((dst_array >= 99) | (dst_array == 0), dst_array)
-
-# Fill nodata in raster using value of nearest cell to match NLUM mask
-ind = nd.distance_transform_edt(dst_array.mask, return_distances = False, return_indices = True)
-NVIS_raster_filled = dst_array[tuple(ind)]
-NVIS_raster_clipped = NVIS_raster_filled * NLUM_mask
-    
-# Save as geoTiff
-with rasterio.open('N:/Data-Master/NVIS/GRID_NVIS6_0_AUST_EXT_MVG/aus6_0e_mvg.tif', 'w+', nodata = 0, dtype = 'uint8', **meta) as dst:
-    dst.write_band(1, NVIS_raster_clipped)
-
-# Flatten 2D array to 1D array of valid values only, add NVIS to cell_df dataframe
-cell_df['NVIS_EXTANT_MVG_ID'] = NVIS_raster_clipped[NLUM_mask]
-
-# Load in look-up tables of MVG and MVS names and join to cell_df
-NVIS_MVG_LUT = pd.read_csv('N:/Data-Master/NVIS/MVG_LUT.csv')
-
-# Join the lookup table to the cell_df DataFrame
-cell_df = cell_df.merge(NVIS_MVG_LUT, left_on = 'NVIS_EXTANT_MVG_ID', right_on = 'MVG_ID', how = 'left')
-cell_df.rename(columns = {'Major Vegetation Group':'NVIS_EXTANT_MVG_NAME'}, inplace = True)
-cell_df = cell_df.drop(columns = ['MVG_ID'])
-
-
-############## NVIS Extant Major Vegetation Subgroups
-
-with rasterio.open('N:/Data-Master/NVIS/GRID_NVIS6_0_AUST_EXT_MVS/aus6_0e_mvs/w001000.adf') as src:
-    dst_array = np.zeros((meta.get('height'), meta.get('width')), np.uint8)
-    reproject(rasterio.band(src, 1), dst_array, dst_transform = meta.get('transform'), dst_crs = meta.get('crs'))
-
-# Mask out nodata cells
-dst_array = ma.masked_where((dst_array >= 99) | (dst_array == 0), dst_array)
-
-# Fill nodata in raster using value of nearest cell to match NLUM mask
-ind = nd.distance_transform_edt(dst_array.mask, return_distances = False, return_indices = True)
-NVIS_raster_filled = dst_array[tuple(ind)]
-NVIS_raster_clipped = NVIS_raster_filled * NLUM_mask
-    
-# Save as geoTiff
-with rasterio.open('N:/Data-Master/NVIS/GRID_NVIS6_0_AUST_EXT_MVS/aus6_0e_mvs.tif', 'w+', nodata = 0, dtype = 'uint8', **meta) as dst:
-    dst.write_band(1, NVIS_raster_clipped)
-
-# Flatten 2D array to 1D array of valid values only, add NVIS to cell_df dataframe
-cell_df['NVIS_EXTANT_MVS_ID'] = NVIS_raster_clipped[NLUM_mask]
-
-# Load in look-up tables of MVG and MVS names and join to cell_df
-NVIS_MVS_LUT = pd.read_csv('N:/Data-Master/NVIS/MVS_LUT.csv')
-
-# Join the lookup table to the cell_df DataFrame
-cell_df = cell_df.merge(NVIS_MVS_LUT, left_on = 'NVIS_EXTANT_MVS_ID', right_on = 'MVS_ID', how = 'left')
-cell_df.rename(columns = {'Major Vegetation Subgroup':'NVIS_EXTANT_MVS_NAME'}, inplace = True)
-cell_df = cell_df.drop(columns = ['MVS_ID'])
-
-
-############## NVIS Pre-European Major Vegetation Groups
-
-with rasterio.open('N:/Data-Master/NVIS/GRID_NVIS6_0_AUST_PRE_MVG/aus6_0p_mvg/w001000.adf') as src:
-    dst_array = np.zeros((meta.get('height'), meta.get('width')), np.uint8)
-    reproject(rasterio.band(src, 1), dst_array, dst_transform = meta.get('transform'), dst_crs = meta.get('crs'))
-
-# Mask out nodata cells
-dst_array = ma.masked_where((dst_array >= 99) | (dst_array == 0), dst_array)
-
-# Fill nodata in raster using value of nearest cell to match NLUM mask
-ind = nd.distance_transform_edt(dst_array.mask, return_distances = False, return_indices = True)
-NVIS_raster_filled = dst_array[tuple(ind)]
-NVIS_raster_clipped = NVIS_raster_filled * NLUM_mask
-    
-# Save as geoTiff
-with rasterio.open('N:/Data-Master/NVIS/GRID_NVIS6_0_AUST_PRE_MVG/aus6_0p_mvg.tif', 'w+', nodata = 0, dtype = 'uint8', **meta) as dst:
-    dst.write_band(1, NVIS_raster_clipped)
-
-# Flatten 2D array to 1D array of valid values only, add NVIS to cell_df dataframe
-cell_df['NVIS_PRE_EURO_MVG_ID'] = NVIS_raster_clipped[NLUM_mask]
-
-# Join the lookup table to the cell_df DataFrame
-cell_df = cell_df.merge(NVIS_MVG_LUT, left_on = 'NVIS_PRE_EURO_MVG_ID', right_on = 'MVG_ID', how = 'left')
-cell_df.rename(columns = {'Major Vegetation Group':'NVIS_PRE_EURO_MVG_NAME'}, inplace = True)
-cell_df = cell_df.drop(columns = ['MVG_ID'])
-
-
-############## NVIS Pre-European Major Vegetation Subgroups
-
-with rasterio.open('N:/Data-Master/NVIS/GRID_NVIS6_0_AUST_PRE_MVS/aus6_0p_mvs/w001000.adf') as src:
-    dst_array = np.zeros((meta.get('height'), meta.get('width')), np.uint8)
-    reproject(rasterio.band(src, 1), dst_array, dst_transform = meta.get('transform'), dst_crs = meta.get('crs'))
-
-# Mask out nodata cells
-dst_array = ma.masked_where((dst_array >= 99) | (dst_array == 0), dst_array)
-
-# Fill nodata in raster using value of nearest cell to match NLUM mask
-ind = nd.distance_transform_edt(dst_array.mask, return_distances = False, return_indices = True)
-NVIS_raster_filled = dst_array[tuple(ind)]
-NVIS_raster_clipped = NVIS_raster_filled * NLUM_mask
-    
-# Save as geoTiff
-with rasterio.open('N:/Data-Master/NVIS/GRID_NVIS6_0_AUST_PRE_MVS/aus6_0p_mvs.tif', 'w+', nodata = 0, dtype = 'uint8', **meta) as dst:
-    dst.write_band(1, NVIS_raster_clipped)
-
-# Flatten 2D array to 1D array of valid values only, add NVIS to cell_df dataframe
-cell_df['NVIS_PRE_EURO_MVS_ID'] = NVIS_raster_clipped[NLUM_mask]
-
-# Join the lookup table to the cell_df DataFrame
-cell_df = cell_df.merge(NVIS_MVS_LUT, left_on = 'NVIS_PRE_EURO_MVS_ID', right_on = 'MVS_ID', how = 'left')
-cell_df.rename(columns = {'Major Vegetation Subgroup':'NVIS_PRE_EURO_MVS_NAME'}, inplace = True)
-cell_df = cell_df.drop(columns = ['MVS_ID'])
 
 # Downcast int64 columns and convert object to category to save memory and space
 downcast(cell_df)

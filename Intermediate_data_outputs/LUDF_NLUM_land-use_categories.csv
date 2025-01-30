@@ -1,0 +1,74 @@
+,PRIMARY_V7,SECONDARY_V7,C18_DESCRIPTION,LU_ID,LU_DESC,IRRIGATION,CELL_COUNT
+0,1 Conservation and natural environments,1.1 Nature conservation,Nature conservation (1.1),0,Non-agricultural land,0,554953
+1,1 Conservation and natural environments,1.2 Managed resource protection,Other protected areas including indigenous uses (1.2),0,Non-agricultural land,0,1029141
+2,1 Conservation and natural environments,1.3 Other minimal use,Other minimal use (1.3),0,Non-agricultural land,0,876603
+3,1 Conservation and natural environments,1.3 Other minimal use,Other minimal use (1.3),1,Unallocated - natural land,0,187910
+4,2 Production from relatively natural environments,2.1 Grazing native vegetation,Grazing native vegetation (2.1),1,Unallocated - natural land,0,2209980
+5,2 Production from relatively natural environments,2.1 Grazing native vegetation,Grazing native vegetation (2.1),31,Dairy - natural land,0,1645
+6,2 Production from relatively natural environments,2.1 Grazing native vegetation,Grazing native vegetation (2.1),32,Beef - natural land,0,642609
+7,2 Production from relatively natural environments,2.1 Grazing native vegetation,Grazing native vegetation (2.1),33,Sheep - natural land,0,225379
+8,2 Production from relatively natural environments,2.2 Production forestry,Production forestry (2.2),0,Non-agricultural land,0,99614
+9,3 Production from dryland agriculture and plantations,3.1 Plantation forestry,"Plantation forestry (3.1, 4.1)",0,Non-agricultural land,0,25762
+10,3 Production from dryland agriculture and plantations,3.2 Grazing modified pastures,Grazing modified pastures (3.2),2,Unallocated - modified land,0,111771
+11,3 Production from dryland agriculture and plantations,3.2 Grazing modified pastures,Grazing modified pastures (3.2),34,Dairy - modified land,0,21490
+12,3 Production from dryland agriculture and plantations,3.2 Grazing modified pastures,Grazing modified pastures (3.2),35,Beef - modified land,0,322659
+13,3 Production from dryland agriculture and plantations,3.2 Grazing modified pastures,Grazing modified pastures (3.2),36,Sheep - modified land,0,207207
+14,3 Production from dryland agriculture and plantations,3.3 Cropping,Dryland cropping (3.3),5,Winter cereals,0,192877
+15,3 Production from dryland agriculture and plantations,3.3 Cropping,Dryland cropping (3.3),6,Summer cereals,0,6208
+16,3 Production from dryland agriculture and plantations,3.3 Cropping,Dryland cropping (3.3),8,Winter legumes,0,22384
+17,3 Production from dryland agriculture and plantations,3.3 Cropping,Dryland cropping (3.3),9,Summer legumes,0,1043
+18,3 Production from dryland agriculture and plantations,3.3 Cropping,Dryland cropping (3.3),10,Winter oilseeds,0,21615
+19,3 Production from dryland agriculture and plantations,3.3 Cropping,Dryland cropping (3.3),11,Summer oilseeds,0,326
+20,3 Production from dryland agriculture and plantations,3.3 Cropping,Dryland cropping (3.3),12,Sugar,0,3378
+21,3 Production from dryland agriculture and plantations,3.3 Cropping,Dryland cropping (3.3),13,Hay,0,16049
+22,3 Production from dryland agriculture and plantations,3.3 Cropping,Dryland cropping (3.3),14,Cotton,0,2228
+23,3 Production from dryland agriculture and plantations,3.3 Cropping,Dryland cropping (3.3),15,Other non-cereal crops,0,936
+24,3 Production from dryland agriculture and plantations,3.4 Perennial horticulture,"Dryland horticulture (3.4, 3.5)",17,Citrus,0,28
+25,3 Production from dryland agriculture and plantations,3.4 Perennial horticulture,"Dryland horticulture (3.4, 3.5)",18,Apples,0,17
+26,3 Production from dryland agriculture and plantations,3.4 Perennial horticulture,"Dryland horticulture (3.4, 3.5)",20,Stone fruit,0,62
+27,3 Production from dryland agriculture and plantations,3.4 Perennial horticulture,"Dryland horticulture (3.4, 3.5)",21,Tropical stone fruit,0,53
+28,3 Production from dryland agriculture and plantations,3.4 Perennial horticulture,"Dryland horticulture (3.4, 3.5)",22,Nuts,0,232
+29,3 Production from dryland agriculture and plantations,3.4 Perennial horticulture,"Dryland horticulture (3.4, 3.5)",24,Plantation fruit,0,80
+30,3 Production from dryland agriculture and plantations,3.4 Perennial horticulture,"Dryland horticulture (3.4, 3.5)",25,Grapes,0,257
+31,3 Production from dryland agriculture and plantations,3.5 Seasonal horticulture,"Dryland horticulture (3.4, 3.5)",16,Vegetables,0,34
+32,4 Production from irrigated agriculture and plantations,4.1 Irrigated plantation forestry,"Plantation forestry (3.1, 4.1)",0,Non-agricultural land,1,146
+33,4 Production from irrigated agriculture and plantations,4.2 Grazing irrigated modified pastures,Irrigated pastures (4.2),34,Dairy - modified land,1,4476
+34,4 Production from irrigated agriculture and plantations,4.2 Grazing irrigated modified pastures,Irrigated pastures (4.2),35,Beef - modified land,1,1764
+35,4 Production from irrigated agriculture and plantations,4.2 Grazing irrigated modified pastures,Irrigated pastures (4.2),36,Sheep - modified land,1,68
+36,4 Production from irrigated agriculture and plantations,4.3 Irrigated cropping,Irrigated cropping (4.3),5,Winter cereals,1,1132
+37,4 Production from irrigated agriculture and plantations,4.3 Irrigated cropping,Irrigated cropping (4.3),6,Summer cereals,1,404
+38,4 Production from irrigated agriculture and plantations,4.3 Irrigated cropping,Irrigated cropping (4.3),7,Rice,1,785
+39,4 Production from irrigated agriculture and plantations,4.3 Irrigated cropping,Irrigated cropping (4.3),8,Winter legumes,1,45
+40,4 Production from irrigated agriculture and plantations,4.3 Irrigated cropping,Irrigated cropping (4.3),9,Summer legumes,1,86
+41,4 Production from irrigated agriculture and plantations,4.3 Irrigated cropping,Irrigated cropping (4.3),10,Winter oilseeds,1,107
+42,4 Production from irrigated agriculture and plantations,4.3 Irrigated cropping,Irrigated cropping (4.3),11,Summer oilseeds,1,104
+43,4 Production from irrigated agriculture and plantations,4.3 Irrigated cropping,Irrigated cropping (4.3),12,Sugar,1,1276
+44,4 Production from irrigated agriculture and plantations,4.3 Irrigated cropping,Irrigated cropping (4.3),13,Hay,1,1647
+45,4 Production from irrigated agriculture and plantations,4.3 Irrigated cropping,Irrigated cropping (4.3),14,Cotton,1,3470
+46,4 Production from irrigated agriculture and plantations,4.4 Irrigated perennial horticulture,"Irrigated horticulture (4.4, 4.5)",15,Other non-cereal crops,1,515
+47,4 Production from irrigated agriculture and plantations,4.4 Irrigated perennial horticulture,"Irrigated horticulture (4.4, 4.5)",17,Citrus,1,246
+48,4 Production from irrigated agriculture and plantations,4.4 Irrigated perennial horticulture,"Irrigated horticulture (4.4, 4.5)",18,Apples,1,100
+49,4 Production from irrigated agriculture and plantations,4.4 Irrigated perennial horticulture,"Irrigated horticulture (4.4, 4.5)",19,Pears,1,27
+50,4 Production from irrigated agriculture and plantations,4.4 Irrigated perennial horticulture,"Irrigated horticulture (4.4, 4.5)",20,Stone fruit,1,384
+51,4 Production from irrigated agriculture and plantations,4.4 Irrigated perennial horticulture,"Irrigated horticulture (4.4, 4.5)",21,Tropical stone fruit,1,177
+52,4 Production from irrigated agriculture and plantations,4.4 Irrigated perennial horticulture,"Irrigated horticulture (4.4, 4.5)",22,Nuts,1,320
+53,4 Production from irrigated agriculture and plantations,4.4 Irrigated perennial horticulture,"Irrigated horticulture (4.4, 4.5)",24,Plantation fruit,1,105
+54,4 Production from irrigated agriculture and plantations,4.4 Irrigated perennial horticulture,"Irrigated horticulture (4.4, 4.5)",25,Grapes,1,1663
+55,4 Production from irrigated agriculture and plantations,4.5 Irrigated seasonal horticulture,"Irrigated horticulture (4.4, 4.5)",16,Vegetables,1,1375
+56,5 Intensive uses,5.0 Intensive uses,"Rural residential and farm infrastructure (5.4.2, 5.4.3, 5.4.4, 5.4.5)",0,Non-agricultural land,0,381
+57,5 Intensive uses,5.1 Intensive horticulture,"Intensive animal and plant production (5.1, 5.2)",0,Non-agricultural land,0,34
+58,5 Intensive uses,5.2 Intensive animal husbandry,"Intensive animal and plant production (5.1, 5.2)",0,Non-agricultural land,0,1403
+59,5 Intensive uses,5.3 Manufacturing and industrial,"Urban intensive uses (5.3, 5.4, 5.4.1, 5.5, 5.6, 5.7)",0,Non-agricultural land,0,713
+60,5 Intensive uses,5.4 Residential and farm infrastructure,"Rural residential and farm infrastructure (5.4.2, 5.4.3, 5.4.4, 5.4.5)",0,Non-agricultural land,0,13357
+61,5 Intensive uses,5.4 Residential and farm infrastructure,"Urban intensive uses (5.3, 5.4, 5.4.1, 5.5, 5.6, 5.7)",0,Non-agricultural land,0,11420
+62,5 Intensive uses,5.5 Services,"Urban intensive uses (5.3, 5.4, 5.4.1, 5.5, 5.6, 5.7)",0,Non-agricultural land,0,3766
+63,5 Intensive uses,5.6 Utilities,"Urban intensive uses (5.3, 5.4, 5.4.1, 5.5, 5.6, 5.7)",0,Non-agricultural land,0,315
+64,5 Intensive uses,5.7 Transport and communication,"Urban intensive uses (5.3, 5.4, 5.4.1, 5.5, 5.6, 5.7)",0,Non-agricultural land,0,1101
+65,5 Intensive uses,5.8 Mining,"Mining and waste (5.8, 5.9)",0,Non-agricultural land,0,1481
+66,5 Intensive uses,5.9 Waste treatment and disposal,"Mining and waste (5.8, 5.9)",0,Non-agricultural land,0,283
+67,6 Water,6.1 Lake,Water (6.0),0,Non-agricultural land,0,81812
+68,6 Water,6.2 Reservoir/dam,Water (6.0),0,Non-agricultural land,0,5128
+69,6 Water,6.3 River,Water (6.0),0,Non-agricultural land,0,4410
+70,6 Water,6.5 Marsh/wetland,Water (6.0),0,Non-agricultural land,0,8885
+71,6 Water,6.6 Estuary/coastal waters,Water (6.0),0,Non-agricultural land,0,16519
+72,No data,No data,No data,0,Non-agricultural land,0,447

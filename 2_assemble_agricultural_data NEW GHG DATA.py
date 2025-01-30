@@ -1113,10 +1113,9 @@ k_lim = n_lim * (k_uptk / n_uptk)
 # Assemble crop and livestock GHG EMISSIONS data
 ############################################################################################################################################
 
-##################  Read in the CROPS EMISSIONS table, join to cell_df, and drop unwanted columns
-##################  NOTE: NEW DATA FROM CSIRO NOT USED DUE TO ERRORS IN GHG ESTIMATES AND MANY MISSING ROWS
-
 """
+##################  NOTE: this NEW DATA FROM CSIRO 20231124 NOT USED DUE TO ERRORS IN GHG ESTIMATES AND MANY MISSING ROWS
+
 # Read crops emissions data
 ghg_df = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20231124/T_GHG_by_SPREAD_SA2_2010_NLUM_Navarroetal_fix_pears_nuts_othernoncereal.csv')
 # ghg_df.drop(columns = ['track', 'AER_ID'], inplace = True)
@@ -1235,7 +1234,6 @@ print('Number of NaNs =', c_ghg[c_ghg.isna().any(axis=1)].shape[0]) # Should be 
 
 ##################  Read in the CROPS EMISSIONS table, join to cell_df, and drop unwanted columns
 
-
 # Read crops emissions data
 ghg_df = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210921/T_GHG_by_SPREAD_SA2_crops_2010_NLUM.csv')
 ghg_df.drop(columns = ['SA4_ID', 'STATE_ID', 'track'], inplace = True)
@@ -1328,10 +1326,39 @@ c_ghg_with_STATE_ID['LU_DESC'] = c_ghg_with_STATE_ID['LU_DESC'].str.capitalize()
 downcast(c_ghg_with_STATE_ID)
 
 # Drop STATE_ID
-c_ghg = c_ghg_with_STATE_ID.drop(columns = 'STATE_ID')
+c_ghg = c_ghg_with_STATE_ID.drop(columns = ['SA4_ID', 'STATE_ID'])
 
 # Save output to file
 c_ghg.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/SA2_crop_GHG_data.h5', key = 'SA2_crop_GHG_data', mode = 'w', format = 't')
+
+
+################ Test 2010 crop GHG data ################
+
+# Get stripped down version of the 2010 land-use map
+ludf_skinny = ludf[['CELL_ID', 'CELL_HA', 'SA2_ID', 'LU_ID', 'IRRIGATION']]
+
+# Select crop cells
+ludf_skinny = ludf_skinny.query('5 <= LU_ID <= 25')
+
+# Merge SA2-based crop GHG with cell-based crop land-use map
+c_test = ludf_skinny.merge(c_ghg, how = 'left', on = ['SA2_ID', 'LU_ID', 'IRRIGATION'])
+
+# Test for NaNs
+print('Number of NaNs =', c_test[c_test.isna().any(axis=1)].shape[0], '\n') # No NaNs
+
+# Calculate total GHG per cell
+c_test['CROP_TCO2E'] = c_test.eval('(CO2E_KG_HA_CHEM_APPL + CO2E_KG_HA_CROP_MGT + CO2E_KG_HA_CULTIV + CO2E_KG_HA_FERT_PROD + CO2E_KG_HA_HARVEST + CO2E_KG_HA_IRRIG + CO2E_KG_HA_PEST_PROD + CO2E_KG_HA_SOIL + CO2E_KG_HA_SOWING) * CELL_HA / 1000')
+
+sources = ['CHEM_APPL', 'CROP_MGT', 'CULTIV', 'FERT_PROD', 'HARVEST', 'IRRIG', 'PEST_PROD', 'SOIL', 'SOWING']
+for source in sources:
+    c_test[source +'_TCO2E'] = 0.0
+    c_test[source +'_TCO2E'] = c_test['CO2E_KG_HA_' + source] * c_test['CELL_HA'] / 1000
+
+# Calculate and print total crop GHG by source
+print('\nCrop GHG emissions 2010 (OLD DATA)\n')
+print(c_test[['CHEM_APPL_TCO2E', 'CROP_MGT_TCO2E', 'CULTIV_TCO2E', 'FERT_PROD_TCO2E', 'HARVEST_TCO2E', 'IRRIG_TCO2E', 'PEST_PROD_TCO2E', 'SOIL_TCO2E', 'SOWING_TCO2E']].sum(), '\n')
+print('Total GHG emissions from crops = ', f"{c_test['CROP_TCO2E'].sum():,.0f}", 'tCO2e')
+
 
 
 
@@ -1339,15 +1366,16 @@ c_ghg.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/
 
 # Read in the livestock emissions table and drop unwanted columns
 ghg_ls = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20231113/T_GHG_by_SPREAD_SA2_livestock_2010_NLUM_per_head.csv')
-ghg_ls.drop(columns = ['track', 'irrigation'], inplace = True) # Dropping irrigation because the data is a duplicate of dryland
+ghg_ls.drop(columns = ['track', 'irrigation'], inplace = True)
 ghg_ls.drop_duplicates(inplace = True, ignore_index = True)
 ghg_ls.loc[ghg_ls.query('SPREAD_Commodity == "Dairy Cattle"').index, 'SPREAD_Commodity'] = 'DAIRY'
 ghg_ls.loc[ghg_ls.query('SPREAD_Commodity == "Beef Cattle"').index, 'SPREAD_Commodity'] = 'BEEF'
 ghg_ls.loc[ghg_ls.query('SPREAD_Commodity == "Sheep"').index, 'SPREAD_Commodity'] = 'SHEEP'
 
 # Re-order and rename columns
-ls_ghg = ghg_ls[['SA2_ID', 'SPREAD_Commodity', 'GHG_enteric_perHead', 'GHG_manure management_perHead', 'GHG_indirect leaching and runoff_perHead', 'GHG_dung and urine_perHead', 'GHG_Seed emissions_perHead', 'GHG_Fodder emissions_perHead', 'GHG_Fuel_perHead', 'GHG_Electricity_perHead']]
-ls_ghg = ls_ghg.rename(columns = {'GHG_enteric_perHead': 'CO2E_KG_HEAD_ENTERIC',
+ls_ghg = ghg_ls[['SA2_ID', 'SPREAD_Commodity', 'SPREAD_ID', 'GHG_enteric_perHead', 'GHG_manure management_perHead', 'GHG_indirect leaching and runoff_perHead', 'GHG_dung and urine_perHead', 'GHG_Seed emissions_perHead', 'GHG_Fodder emissions_perHead', 'GHG_Fuel_perHead', 'GHG_Electricity_perHead']]
+ls_ghg = ls_ghg.rename(columns = {'irrigation': 'IRRIGATION', 
+                                  'GHG_enteric_perHead': 'CO2E_KG_HEAD_ENTERIC',
                                   'GHG_manure management_perHead': 'CO2E_KG_HEAD_MANURE_MGT',
                                   'GHG_indirect leaching and runoff_perHead': 'CO2E_KG_HEAD_IND_LEACH_RUNOFF',
                                   'GHG_dung and urine_perHead': 'CO2E_KG_HEAD_DUNG_URINE', 
@@ -1356,9 +1384,6 @@ ls_ghg = ls_ghg.rename(columns = {'GHG_enteric_perHead': 'CO2E_KG_HEAD_ENTERIC',
                                   'GHG_Fuel_perHead': 'CO2E_KG_HEAD_FUEL', 
                                   'GHG_Electricity_perHead': 'CO2E_KG_HEAD_ELEC'
                                   })
-
-# Sort in place
-ls_ghg = ls_ghg.sort_values(by = ['SA2_ID', 'SPREAD_Commodity'], ascending = True).reset_index(drop = True)
 
 # Calculate pivot table
 lvstk_ghg_sources = ['CO2E_KG_HEAD_ENTERIC', 'CO2E_KG_HEAD_MANURE_MGT', 'CO2E_KG_HEAD_IND_LEACH_RUNOFF', 'CO2E_KG_HEAD_DUNG_URINE', 'CO2E_KG_HEAD_SEED', 'CO2E_KG_HEAD_FODDER', 'CO2E_KG_HEAD_FUEL', 'CO2E_KG_HEAD_ELEC'].sort()
@@ -1513,7 +1538,7 @@ irr_pasture_ghg.loc[irr_pasture_ghg.query('CO2E_KG_HA_SOWING != CO2E_KG_HA_SOWIN
 irr_pasture_ghg.loc[irr_pasture_ghg.query('CO2E_KG_HA_SOWING != CO2E_KG_HA_SOWING').index, 'CO2E_KG_HA_SOWING'] = irr_pasture_ghg['CO2E_KG_HA_SOWING_STE']
 irr_pasture_ghg.loc[irr_pasture_ghg.query('CO2E_KG_HA_SOWING != CO2E_KG_HA_SOWING').index, 'CO2E_KG_HA_SOWING'] = irr_pasture_ghg['CO2E_KG_HA_SOWING'].mean()
 
-# Set HARVEST emissions to zero becasue pasture is not harvested
+# Set HARVEST emissions to zero because pasture is not harvested
 irr_pasture_ghg['CO2E_KG_HA_HARVEST'] = 0
 
 # Whittle down the columns 
@@ -1528,13 +1553,27 @@ irr_pasture_ghg.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial
 
 
 
-################ Test 2010 livestock GHG data ################              NOTE - something is wrong with this code as it returns 83 MT CO2e
+################ Test 2010 livestock GHG data ################
 
 ludf_skinny = ludf_[['CELL_ID', 'CELL_HA', 'SA2_ID', 'LU_ID', 'IRRIGATION', 'SPREAD_id_mapped', 'YIELD_POT_DAIRY', 'YIELD_POT_BEEF', 'YIELD_POT_SHEEP']]
 
 p_ls.columns = p_ls.columns.to_flat_index()
 ls_t1 = ludf_skinny.merge(p_ls, how = 'left', on = 'SA2_ID')
 ls_t2 = ls_t1.merge(irr_pasture_ghg, how = 'left', on = 'SA2_ID')
+
+# Calculate emissions by livestock and biogenic sources
+biogenic_sources = ['ENTERIC', 'MANURE_MGT', 'IND_LEACH_RUNOFF', 'DUNG_URINE', 'SEED', 'FODDER', 'FUEL', 'ELEC']
+for source in biogenic_sources:
+    ls_t2[source +'_TCO2E'] = 0.0
+    idx = ls_t2.query('SPREAD_id_mapped == 31').index 
+    ls_t2.loc[idx, source +'_TCO2E'] = ls_t2['YIELD_POT_DAIRY'] * ls_t2[('DAIRY', 'CO2E_KG_HEAD_' + source)] 
+    idx = ls_t2.query('SPREAD_id_mapped == 32').index 
+    ls_t2.loc[idx, source +'_TCO2E'] = ls_t2['YIELD_POT_BEEF'] * ls_t2[('BEEF', 'CO2E_KG_HEAD_' + source)] 
+    idx = ls_t2.query('SPREAD_id_mapped == 33').index 
+    ls_t2.loc[idx, source +'_TCO2E'] = ls_t2['YIELD_POT_SHEEP'] * ls_t2[('SHEEP', 'CO2E_KG_HEAD_' + source)] 
+    
+    ls_t2[source +'_TCO2E'] = ls_t2[source +'_TCO2E'] * (ls_t2['IRRIGATION'] + 1) * cell_df['CELL_HA'] / 1000 
+    
 
 ls_t2['LVSTK_TCO2E'] = 0.0
 ls_t2['IRRPAS_TCO2E'] = 0.0
@@ -1547,20 +1586,238 @@ ls_t2.loc[idx2, 'LVSTK_TCO2E'] = ls_t2['YIELD_POT_BEEF'] * (ls_t2[('BEEF', 'CO2E
 idx3 = ls_t2.query('SPREAD_id_mapped == 33').index 
 ls_t2.loc[idx3, 'LVSTK_TCO2E'] = ls_t2['YIELD_POT_SHEEP'] * (ls_t2[('SHEEP', 'CO2E_KG_HEAD_ENTERIC')] + ls_t2[('SHEEP', 'CO2E_KG_HEAD_MANURE_MGT')] + ls_t2[('SHEEP', 'CO2E_KG_HEAD_IND_LEACH_RUNOFF')] + ls_t2[('SHEEP', 'CO2E_KG_HEAD_DUNG_URINE')] + ls_t2[('SHEEP', 'CO2E_KG_HEAD_SEED')] + ls_t2[('SHEEP', 'CO2E_KG_HEAD_FODDER')] + ls_t2[('SHEEP', 'CO2E_KG_HEAD_FUEL')] + ls_t2[('SHEEP', 'CO2E_KG_HEAD_ELEC')]) / 1000
 
-ls_t2['LVSTK_TCO2E'] = ls_t2['LVSTK_TCO2E'] * cell_df['CELL_HA']
+ls_t2['LVSTK_TCO2E'] = ls_t2['LVSTK_TCO2E'] * (ls_t2['IRRIGATION'] + 1) * cell_df['CELL_HA']
 
 idx4 = ls_t2.query('IRRIGATION == 1').index 
-ls_t2.loc[idx4, 'LVSTK_TCO2E'] = ls_t2.eval('LVSTK_TCO2E * 2')
 ls_t2.loc[idx4, 'IRRPAS_TCO2E'] = ls_t2.eval('CO2E_KG_HA_CHEM_APPL + CO2E_KG_HA_CROP_MGT + CO2E_KG_HA_CULTIV + CO2E_KG_HA_FERT_PROD + CO2E_KG_HA_HARVEST + CO2E_KG_HA_IRRIG + CO2E_KG_HA_PEST_PROD + CO2E_KG_HA_SOIL + CO2E_KG_HA_SOWING') / 1000
 
 ls_t2['IRRPAS_TCO2E'] = ls_t2.eval('IRRPAS_TCO2E * CELL_HA')
 
-
 ls_t2['TOTAL_TCO2E'] = ls_t2.eval('LVSTK_TCO2E + IRRPAS_TCO2E')
 
-print(ls_t2['LVSTK_TCO2E'].sum())
-print(ls_t2['IRRPAS_TCO2E'].sum())
-print(ls_t2['TOTAL_TCO2E'].sum())
+print('\nLivestock GHG emissions 2010\n')
+
+print(ls_t2.query('SPREAD_id_mapped > 30').loc[:, ['ENTERIC_TCO2E', 'MANURE_MGT_TCO2E', 'IND_LEACH_RUNOFF_TCO2E', 'DUNG_URINE_TCO2E', 'SEED_TCO2E', 'FODDER_TCO2E', 'FUEL_TCO2E', 'ELEC_TCO2E']].sum(), '\n')
+
+print('\nLivestock biogenic emissions =', f"{ls_t2['LVSTK_TCO2E'].sum():,.0f}", 'tCO2e')
+print('Livestock non-biogenic emissions =', f"{ls_t2['IRRPAS_TCO2E'].sum():,.0f}", 'tCO2e')
+print('Livestock total emissions =', f"{ls_t2['TOTAL_TCO2E'].sum():,.0f}", 'tCO2e\n')
+
+
+
+
+
+
+############################################################################################################################################
+# Evaluate NEW crop and livestock GHG data from CSIRO provided 14/11/2024
+############################################################################################################################################
+
+################ Crops (NEW DATA)
+
+# Read crops emissions data
+ghg_df2 = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20241114/T_GHG_by_SPREAD_SA2_2010_Navarroetal_UNFCCC_NGGI_livestock_and_crops_plus_transport.csv')
+
+# Read in the NLUM SA2 template to check for NaNs (this table has every combination of LU, irr/dry, and SA2)
+def_df2 = pd.read_hdf('N:/Data-Master/Profit_map/NLUM_SPREAD_LU_ID_Mapped_Concordance.h5')
+
+# Merge SA4 and STATE ID columns for gap filling
+def_df2 = def_df2.query('5 <= LU_ID <= 25') # .merge(lut, how = 'left', on = 'SA2_ID')
+
+# Join to template and check for nodata. Note: they only occur in kgCO2e_crop_management for valid reasons so we set them to zero.
+c_ghg2 = def_df2.query('5 <= LU_ID <= 25').merge(ghg_df2, how = 'left', left_on = ['SA2_ID', 'LU_ID', 'IRRIGATION'], right_on = ['SA2_ID', 'SPREAD_ID', 'irrigation'])
+print('Number of NaNs =', c_ghg2[c_ghg.isna().any(axis=1)].shape[0]) # No NaNs straight outta the box, unbelievable!
+
+cols_sorted = ['kgco2_fert', 'kgco2_pest', 'kgco2_irrig', 'kgco2_chem_app', 'kgco2_crop_management', 'kgco2_cult', 'kgco2_harvest', 'kgco2_sowing', 'kgco2_soil']
+cols_sorted.sort()
+c_ghg2 = c_ghg2[['SA2_ID', 'LU_ID', 'SPREAD_Commodity', 'IRRIGATION'] + cols_sorted]
+c_ghg2 = c_ghg2.rename(columns = {'SPREAD_ID': 'LU_ID', 
+                                'SPREAD_Commodity': 'LU_DESC',
+                                'irrigation': 'IRRIGATION', 
+                                'kgco2_fert': 'CO2E_KG_HA_FERT_PROD',
+                                'kgco2_pest': 'CO2E_KG_HA_PEST_PROD',
+                                'kgco2_irrig': 'CO2E_KG_HA_IRRIG',
+                                'kgco2_chem_app': 'CO2E_KG_HA_CHEM_APPL', 
+                                'kgco2_crop_management': 'CO2E_KG_HA_CROP_MGT', 
+                                'kgco2_cult': 'CO2E_KG_HA_CULTIV', 
+                                'kgco2_harvest': 'CO2E_KG_HA_HARVEST', 
+                                'kgco2_sowing': 'CO2E_KG_HA_SOWING', 
+                                'kgco2_soil': 'CO2E_KG_HA_SOIL'})
+
+downcast(c_ghg2)
+
+# Save output to file       ###### NOT USED ######
+# c_ghg2.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/SA2_crop_GHG_data_NEW.h5', key = 'SA2_crop_GHG_data', mode = 'w', format = 't')
+
+
+################ Test NEW 2010 crop GHG data 
+
+# Get stripped down version of the 2010 land-use map
+ludf_skinny = ludf[['CELL_ID', 'CELL_HA', 'SA2_ID', 'LU_ID', 'IRRIGATION']]
+
+# Select crop cells
+ludf_skinny = ludf_skinny.query('5 <= LU_ID <= 25')
+
+
+# Merge SA2-based crop GHG with cell-based crop land-use map
+c_test = ludf_skinny.merge(c_ghg2, how = 'left', on = ['SA2_ID', 'LU_ID', 'IRRIGATION'])
+
+# Test for NaNs
+print('Number of NaNs =', c_test[c_test.isna().any(axis=1)].shape[0], '\n') # No NaNs
+
+# Calculate total GHG per cell
+c_test['CROP_TCO2E'] = c_test.eval('(CO2E_KG_HA_CHEM_APPL + CO2E_KG_HA_CROP_MGT + CO2E_KG_HA_CULTIV + CO2E_KG_HA_FERT_PROD + CO2E_KG_HA_HARVEST + CO2E_KG_HA_IRRIG + CO2E_KG_HA_PEST_PROD + CO2E_KG_HA_SOIL + CO2E_KG_HA_SOWING) * CELL_HA / 1000')
+
+sources = ['CHEM_APPL', 'CROP_MGT', 'CULTIV', 'FERT_PROD', 'HARVEST', 'IRRIG', 'PEST_PROD', 'SOIL', 'SOWING']
+for source in sources:
+    c_test[source +'_TCO2E'] = 0.0
+    c_test[source +'_TCO2E'] = c_test['CO2E_KG_HA_' + source] * c_test['CELL_HA'] / 1000
+
+# Calculate and print total crop GHG by source
+print('\nCrop GHG emissions 2010 (NEW DATA)\n')
+print(c_test[['CHEM_APPL_TCO2E', 'CROP_MGT_TCO2E', 'CULTIV_TCO2E', 'FERT_PROD_TCO2E', 'HARVEST_TCO2E', 'IRRIG_TCO2E', 'PEST_PROD_TCO2E', 'SOIL_TCO2E', 'SOWING_TCO2E']].sum(), '\n')
+print('Total GHG emissions from crops = ', f"{c_test['CROP_TCO2E'].sum():,.0f}", 'tCO2e')
+
+
+
+
+################ Livestock (NEW DATA)
+
+# Read in the livestock emissions
+ghg_df2 = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20241114/T_GHG_by_SPREAD_SA2_2010_Navarroetal_UNFCCC_NGGI_livestock_and_crops_plus_transport.csv')
+
+# Recalculate livestock names
+ghg_df2.loc[ghg_df2.query('SPREAD_Commodity == "Dairy Cattle"').index, 'SPREAD_Commodity'] = 'DAIRY'
+ghg_df2.loc[ghg_df2.query('SPREAD_Commodity == "Beef Cattle"').index, 'SPREAD_Commodity'] = 'BEEF'
+ghg_df2.loc[ghg_df2.query('SPREAD_Commodity == "Sheep"').index, 'SPREAD_Commodity'] = 'SHEEP'
+
+# Select livestock data only
+ghg_df2 = ghg_df2.query('SPREAD_Commodity in ["DAIRY", "BEEF", "SHEEP"]')
+
+# Re-order and rename columns
+ls_ghg2 = ghg_df2[['SA2_ID', 'SPREAD_Commodity', 'SPREAD_ID', 'kgco2_livestock_enteric', 'kgco2_livestock_manure_management', 
+                   'kgco2_livestock_n2o_leaching_runoff', 'kgco2_livestock_n2o_dung_urine', 'kgco2_livestock_pasture_seeds', 
+                   'kgco2_livestock_fodder', 'kgco2_livestock_fuel', 'kgco2_livestock_electricity']]
+
+ls_ghg2 = ls_ghg2.rename(columns = {'kgco2_livestock_enteric': 'CO2E_KG_HEAD_ENTERIC',
+                                    'kgco2_livestock_manure_management': 'CO2E_KG_HEAD_MANURE_MGT',
+                                    'kgco2_livestock_n2o_leaching_runoff': 'CO2E_KG_HEAD_IND_LEACH_RUNOFF',
+                                    'kgco2_livestock_n2o_dung_urine': 'CO2E_KG_HEAD_DUNG_URINE', 
+                                    'kgco2_livestock_pasture_seeds': 'CO2E_KG_HEAD_SEED', 
+                                    'kgco2_livestock_fodder': 'CO2E_KG_HEAD_FODDER', 
+                                    'kgco2_livestock_fuel': 'CO2E_KG_HEAD_FUEL', 
+                                    'kgco2_livestock_electricity': 'CO2E_KG_HEAD_ELEC'
+                                   })
+
+# Drop duplicate records (duplicates exist because irrigated and dryland are the same)
+ls_ghg2.drop_duplicates(inplace = True, ignore_index = True)
+
+# Summarise livestock LU_ID classes by SA2 from livestock map to check for nodata in GHG data
+ls_map = ludf.groupby(['SA2_ID', 'SPREAD_id_mapped'], observed = True)['X'].count().reset_index()
+
+# Merge livestock GHG to livestock SA2 dataframe by SA2 to check nodata
+ls_map_m = ls_map.merge(ls_ghg2, how = 'left', left_on = ['SA2_ID', 'SPREAD_id_mapped'], right_on = ['SA2_ID', 'SPREAD_ID'])
+print('Number of NaNs =', ls_map_m[ls_map_m.isna().any(axis=1)].shape[0]) # No NaNs
+
+# Calculate GHG pivot table
+lvstk_ghg_sources = ['CO2E_KG_HEAD_ENTERIC', 'CO2E_KG_HEAD_MANURE_MGT', 'CO2E_KG_HEAD_IND_LEACH_RUNOFF', 'CO2E_KG_HEAD_DUNG_URINE', 'CO2E_KG_HEAD_SEED', 'CO2E_KG_HEAD_FODDER', 'CO2E_KG_HEAD_FUEL', 'CO2E_KG_HEAD_ELEC'].sort()
+p_ls = pd.pivot_table(ls_ghg2, 
+                      values = lvstk_ghg_sources, 
+                      index = 'SA2_ID', 
+                      columns = 'SPREAD_Commodity', 
+                      aggfunc = 'first'
+                     ).sort_values(by = 'SA2_ID')
+
+# Rearrange pivot table
+p_ls.columns = p_ls.columns.rename('Component', level = 0)
+p_ls = p_ls.reorder_levels(['SPREAD_Commodity', 'Component'], axis = 1)
+
+# Flatten multiindex dataframe
+p_ls.columns = p_ls.columns.to_flat_index()
+
+# Recreate multiindex dataframe
+p_ls.columns = pd.MultiIndex.from_tuples(p_ls.columns, names=['Livestock type','GHG Source'])
+
+# Sort columns
+p_ls.sort_index(axis = 1, level = 0, inplace = True)
+
+# Downcast and save file       ###### NOT USED ######
+downcast(p_ls)
+#p_ls.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/SA2_livestock_GHG_data.h5', key = 'SA2_livestock_GHG_data', mode = 'w', format = 't')
+
+
+
+################ Pasture
+
+cols_sorted = ['kgco2_fert', 'kgco2_pest', 'kgco2_irrig', 'kgco2_chem_app', 'kgco2_crop_management', 'kgco2_cult', 'kgco2_harvest', 'kgco2_sowing', 'kgco2_soil']
+cols_sorted.sort()
+p_ghg2 = ghg_df2[['SA2_ID', 'SPREAD_ID', 'SPREAD_Commodity', 'irrigation'] + cols_sorted]
+p_ghg2 = p_ghg2.rename(columns = {'irrigation': 'IRRIGATION', 
+                                  'kgco2_fert': 'CO2E_KG_HEAD_FERT_PROD',
+                                  'kgco2_pest': 'CO2E_KG_HEAD_PEST_PROD',
+                                  'kgco2_irrig': 'CO2E_KG_HEAD_IRRIG',
+                                  'kgco2_chem_app': 'CO2E_KG_HEAD_CHEM_APPL', 
+                                  'kgco2_crop_management': 'CO2E_KG_HEAD_CROP_MGT', 
+                                  'kgco2_cult': 'CO2E_KG_HEAD_CULTIV', 
+                                  'kgco2_harvest': 'CO2E_KG_HEAD_HARVEST', 
+                                  'kgco2_sowing': 'CO2E_KG_HEAD_SOWING', 
+                                  'kgco2_soil': 'CO2E_KG_HEAD_SOIL'})
+
+downcast(p_ghg2)
+
+# Summarise livestock LU_ID classes by SA2 from livestock map to check for nodata in GHG data
+ls_map = ludf.groupby(['SA2_ID', 'SPREAD_id_mapped', 'IRRIGATION'], observed = True)['X'].count().reset_index()
+
+# Merge livestock GHG to livestock SA2 dataframe by SA2 to check nodata
+ls_map_m = ls_map.merge(p_ghg2, how = 'left', left_on = ['SA2_ID', 'SPREAD_id_mapped', 'IRRIGATION'], right_on = ['SA2_ID', 'SPREAD_ID', 'IRRIGATION'])
+print('Number of NaNs =', ls_map_m[ls_map_m.isna().any(axis=1)].shape[0]) # No NaNs
+
+
+
+################ Test NEW 2010 livestock GHG data 
+
+ludf_skinny = ludf_[['CELL_ID', 'CELL_HA', 'SA2_ID', 'LU_ID', 'LU_DESC', 'IRRIGATION', 'SPREAD_id_mapped', 'YIELD_POT_DAIRY', 'YIELD_POT_BEEF', 'YIELD_POT_SHEEP']]
+
+p_ls.columns = p_ls.columns.to_flat_index()
+ls_t1 = ludf_skinny.merge(p_ls, how = 'left', on = 'SA2_ID')
+ls_t2 = ls_t1.merge(p_ghg2, how = 'left', left_on = ['SA2_ID', 'SPREAD_id_mapped', 'IRRIGATION'], right_on = ['SA2_ID', 'SPREAD_ID', 'IRRIGATION'])
+
+# Calculate emissions by livestock and biogenic sources
+biogenic_sources = ['ENTERIC', 'MANURE_MGT', 'IND_LEACH_RUNOFF', 'DUNG_URINE', 'SEED', 'FODDER', 'FUEL', 'ELEC']
+for source in biogenic_sources:
+    ls_t2[source +'_TCO2E'] = 0.0
+    idx = ls_t2.query('SPREAD_id_mapped == 31').index 
+    ls_t2.loc[idx, source +'_TCO2E'] = ls_t2['YIELD_POT_DAIRY'] * ls_t2[('DAIRY', 'CO2E_KG_HEAD_' + source)] 
+    idx = ls_t2.query('SPREAD_id_mapped == 32').index 
+    ls_t2.loc[idx, source +'_TCO2E'] = ls_t2['YIELD_POT_BEEF'] * ls_t2[('BEEF', 'CO2E_KG_HEAD_' + source)] 
+    idx = ls_t2.query('SPREAD_id_mapped == 33').index 
+    ls_t2.loc[idx, source +'_TCO2E'] = ls_t2['YIELD_POT_SHEEP'] * ls_t2[('SHEEP', 'CO2E_KG_HEAD_' + source)]
+    
+    ls_t2[source +'_TCO2E'] = ls_t2[source +'_TCO2E'] * (ls_t2['IRRIGATION'] + 1) * cell_df['CELL_HA'] / 1000 
+
+non_biogenic_sources = ['CHEM_APPL', 'CROP_MGT', 'CULTIV', 'FERT_PROD', 'HARVEST', 'IRRIG', 'PEST_PROD', 'SOIL', 'SOWING']
+for source in non_biogenic_sources:
+    ls_t2[source +'_TCO2E'] = 0.0
+    idx = ls_t2.query('LU_ID == 34').index  # LU_ID used because non-biogenic emissions are applied to sown pastures only, not native pastures
+    ls_t2.loc[idx, source +'_TCO2E'] = ls_t2['YIELD_POT_DAIRY'] * ls_t2['CO2E_KG_HEAD_' + source] 
+    idx = ls_t2.query('LU_ID == 35').index 
+    ls_t2.loc[idx, source +'_TCO2E'] = ls_t2['YIELD_POT_BEEF'] * ls_t2['CO2E_KG_HEAD_' + source] 
+    idx = ls_t2.query('LU_ID == 36').index 
+    ls_t2.loc[idx, source +'_TCO2E'] = ls_t2['YIELD_POT_SHEEP'] * ls_t2['CO2E_KG_HEAD_' + source]
+    
+    ls_t2[source +'_TCO2E'] = ls_t2[source +'_TCO2E'] * (ls_t2['IRRIGATION'] + 1) * cell_df['CELL_HA'] / 1000 
+  
+ls_ghg_biogenic = ls_t2.eval('ENTERIC_TCO2E + MANURE_MGT_TCO2E + IND_LEACH_RUNOFF_TCO2E + DUNG_URINE_TCO2E + SEED_TCO2E + FODDER_TCO2E + FUEL_TCO2E + ELEC_TCO2E').sum()
+ls_ghg_non_biogenic = ls_t2.eval('CHEM_APPL_TCO2E + CROP_MGT_TCO2E + CULTIV_TCO2E + FERT_PROD_TCO2E + HARVEST_TCO2E + IRRIG_TCO2E + PEST_PROD_TCO2E + SOIL_TCO2E + SOWING_TCO2E').sum()
+total = ls_ghg_biogenic + ls_ghg_non_biogenic
+
+print('\nLivestock GHG emissions 2010 NEW DATA\n')
+
+print(ls_t2.query('SPREAD_id_mapped > 30').loc[:, ['ENTERIC_TCO2E', 'MANURE_MGT_TCO2E', 'IND_LEACH_RUNOFF_TCO2E', 'DUNG_URINE_TCO2E', 'SEED_TCO2E', 'FODDER_TCO2E', 'FUEL_TCO2E', 'ELEC_TCO2E']].sum(), '\n')
+print(ls_t2.query('SPREAD_id_mapped > 30').loc[:, ['CHEM_APPL_TCO2E', 'CROP_MGT_TCO2E', 'CULTIV_TCO2E', 'FERT_PROD_TCO2E', 'HARVEST_TCO2E', 'IRRIG_TCO2E', 'PEST_PROD_TCO2E', 'SOIL_TCO2E', 'SOWING_TCO2E']].sum(), '\n')
+
+print('\nLivestock biogenic emissions =', f"{ls_ghg_biogenic:,.0f}", 'tCO2e')
+print('Livestock pasture emissions =', f"{ls_ghg_non_biogenic:,.0f}", 'tCO2e')
+print('Livestock total emissions =', f"{total:,.0f}", 'tCO2e\n')
 
 
 
