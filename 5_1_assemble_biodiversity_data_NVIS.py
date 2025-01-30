@@ -16,7 +16,7 @@ from affine import Affine
 
 
 '''
-Reproject NVIS Extant + Pre-European Major Vegetation Groups and Subgroups rasters, match NLUM, save GeoTiff
+Reproject NVIS Extant + Pre-European Major Vegetation Groups and Subgroups rasters, match NLUM, save to GeoTiff and NetCDF
 '''
 
 ref_GEOTIFF = 'N:/Data-Master/National_Landuse_Map/NLUM_2010-11_clip.tif'
@@ -85,35 +85,37 @@ for gdb_path, layer_raster, layer_attribute in files:
     src_att = src_att[['Value', 'NAME']]
     src_att.to_csv(f'{os.path.dirname(gdb_path)}/{layer_raster}_lookup.csv', index=False)
 
+
     # Create a list of delayed jobs, so we can reproject and average rasters in parallel with `n_workers`
     jobs = [delayed(reproject_and_average)(val, src_arr, src.transform, src.crs, meta) for val in src_att['Value']]
     dst_array = np.stack(Parallel(n_jobs=n_workers)(jobs), axis=0)
     
+    
     # Save reprojected raster to GeoTiff
-    save_path = f'{os.path.dirname(gdb_path)}/{layer_raster}1.tif'
+    save_path = f'{os.path.dirname(gdb_path)}/{layer_raster}.tif'
     with rasterio.open(save_path, 'w', **meta, PROFILE='GEOTIFF', count=dst_array.shape[0], dtype=dst_array.dtype) as dst:
         # Write each band to the raster
         for i in range(dst_array.shape[0]):
             dst.write(dst_array[i], i+1)
-            dst.set_band_description(i+1, src_att['Value'][i])
-        
+        # Set band descriptions
+        dst.descriptions = tuple(src_att['Value'].astype(str).str.zfill(2).values)
         
 
-    # # Get the cells based on NLUM mask
-    # dst_array_flat = dst_array[:,NLUM_mask]
-    # # Create xarray DataArray with group and cell dimensions
-    # dst_array_xr = xr.DataArray(
-    #     dst_array_flat, 
-    #     dims=['group', 'cell'], 
-    #     coords={'group':src_att['NAME'], 'cell':np.arange(dst_array_flat.shape[1])}
-    # )
+    # Get the cells based on NLUM mask
+    dst_array_flat = dst_array[:,NLUM_mask]
+    # Create xarray DataArray with group and cell dimensions
+    dst_array_xr = xr.DataArray(
+        dst_array_flat, 
+        dims=['group', 'cell'], 
+        coords={'group':src_att['NAME'], 'cell':np.arange(dst_array_flat.shape[1])}
+    )
     
 
-    # # Save xarray DataArray to NetCDF
-    # save_path = f'{os.path.dirname(gdb_path)}/{layer_raster}.nc'
-    # encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}} 
-    # dst_array_xr.name = 'data'
-    # dst_array_xr.to_netcdf(save_path, encoding=encoding, engine='h5netcdf')
+    # Save xarray DataArray to NetCDF
+    save_path = f'{os.path.dirname(gdb_path)}/{layer_raster}.nc'
+    encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}} 
+    dst_array_xr.name = 'data'
+    dst_array_xr.to_netcdf(save_path, encoding=encoding, engine='h5netcdf')
 
 
 
