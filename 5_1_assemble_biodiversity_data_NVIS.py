@@ -1,13 +1,12 @@
 import os
-import h5py
+import netCDF4
 import numpy as np
-import numpy.ma as ma
 import geopandas as gpd
+import pandas as pd
 import rasterio
 import xarray as xr
 import fiona
 
-from scipy import ndimage as nd
 from rasterio.warp import reproject
 from joblib import Parallel, delayed
 from pyproj import CRS
@@ -16,13 +15,14 @@ from affine import Affine
 
 
 '''
-Reproject NVIS Extant + Pre-European Major Vegetation Groups and Subgroups rasters, match NLUM, save to GeoTiff and NetCDF
+Reproject NVIS Extant + Pre-European Major Vegetation Groups and Subgroups rasters to match NLUM, save to GeoTiff and NetCDF
 '''
 
-ref_GEOTIFF = 'N:/Data-Master/National_Landuse_Map/NLUM_2010-11_clip.tif'
+mask_GEOTIFF = 'N:/Data-Master/National_Landuse_Map/NLUM_2010-11_clip.tif'
+area_ha_GEOTIFF = 'N:/Data-Master/National_Landuse_Map/NLUM_2010-11_cell_ha.tif'
 
-# Open NLUM_ID as mask raster and get metadata
-with rasterio.open(ref_GEOTIFF) as rst:
+# Get metadata from mask_GEOTIFF
+with rasterio.open(mask_GEOTIFF) as rst:
     # Load a 2D masked array with nodata masked out
     NLUM_ID_raster = rst.read(1, masked=True) 
     NLUM_mask = NLUM_ID_raster.mask == False
@@ -33,7 +33,11 @@ with rasterio.open(ref_GEOTIFF) as rst:
     meta.update(compress='lzw', driver='GTiff') # , dtype='int32', nodata='0')
     [meta.pop(key) for key in ['dtype', 'nodata', 'count', 'driver']] # Need to add dtype and nodata manually when exporting GeoTiffs
 
-
+# Get real area in hectares from area_ha_GEOTIFF
+with rasterio.open(area_ha_GEOTIFF) as rst:
+    NLUM_area = rst.read(1)
+    NLUM_area_mask = NLUM_area[NLUM_mask]
+    
 
 ############## Functions
 
@@ -54,10 +58,10 @@ def reproject_and_average(val:int, src_arr:np.ndarray, src_trans:Affine, src_crs
 
 ############## List raster layers in NVIS geoDatabase folder
 
-# Present Major Vegetation Groups and Subgroups
+# Present Vegetation Groups and Subgroups
 fiona.listlayers('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_EXT_ALL/NVIS_V7_0_AUST_EXT.gdb')
      
-# Pre1750 Major Vegetation Groups and Subgroups
+# Pre1750 Vegetation Groups and Subgroups
 fiona.listlayers('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL/NVIS_V7_0_AUST_PRE.gdb')
 
 
@@ -110,7 +114,7 @@ for gdb_path, layer_raster, layer_attribute in files:
         coords={'group':src_att['NAME'], 'cell':np.arange(dst_array_flat.shape[1])}
     )
     
-
+    
     # Save xarray DataArray to NetCDF
     save_path = f'{os.path.dirname(gdb_path)}/{layer_raster}.nc'
     encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}} 
@@ -120,34 +124,175 @@ for gdb_path, layer_raster, layer_attribute in files:
 
 
 
+# --------------- Remove invalid vegetation class; Apply spatial mask ---------------
+
+# Get group names for both pre-European and extant vegetation
+PRE_mvg_groups = pd.read_csv('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL/NVIS7_0_AUST_PRE_MVG_ALB_lookup.csv')['NAME'].tolist()
+PRE_mvs_groups = pd.read_csv('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL/NVIS7_0_AUST_PRE_MVS_ALB_lookup.csv')['NAME'].tolist()
+EXT_mvg_groups = pd.read_csv('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_EXT_ALL/NVIS7_0_AUST_EXT_MVG_ALB_lookup.csv')['NAME'].tolist()
+EXT_mvs_groups = pd.read_csv('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_EXT_ALL/NVIS7_0_AUST_EXT_MVS_ALB_lookup.csv')['NAME'].tolist()
 
 
-'''
-Below is the original code for reference
-'''
+# # Some groups are undertmined and should be exclude from the analysis, such as 'Other ...', 'Unknown/no data', and 'Unclassified'.
+# MVG_rm_names = [i for i in PRE_mvg_groups if 'Other' in i or 'Unknown' in i or 'Unclassified' in i]     # 7 groups
+# MVS_rm_names = [i for i in PRE_mvs_groups if 'Other' in i or 'Unknown' in i or 'Unclassified' in i]     # 11 groups
 
-# ############## NVIS Pre-European Major Vegetation Groups
+# # Names appread in extant but not in pre-European should be removed
+# MVG_rm_names += [i for i in EXT_mvg_groups if i not in PRE_mvg_groups]  # 11 groups
+# MVS_rm_names += [i for i in EXT_mvs_groups if i not in PRE_mvs_groups]  # 16 groups
 
-# with rasterio.open('N:/Data-Master/NVIS/GRID_NVIS6_0_AUST_PRE_MVG/aus6_0p_mvg/w001000.adf') as src:
-#     dst_array = np.zeros((meta.get('height'), meta.get('width')), np.uint8)
-#     reproject(rasterio.band(src, 1), dst_array, dst_transform = meta.get('transform'), dst_crs = meta.get('crs'))
+# # Remove duplicates
+# rm_names = list(set(MVG_rm_names + MVS_rm_names))
 
-# # Mask out nodata cells
-# dst_array = ma.masked_where((dst_array >= 99) | (dst_array == 0), dst_array)
 
-# # Fill nodata in raster using value of nearest cell to match NLUM mask
-# ind = nd.distance_transform_edt(dst_array.mask, return_distances = False, return_indices = True)
-# NVIS_raster_filled = dst_array[tuple(ind)]
-# NVIS_raster_clipped = NVIS_raster_filled * NLUM_mask
+rm_names = ['Unknown/no data', 'Unknown/No data']
+
+
+# Calculate the sum of all groups for each raster
+for gdb_path, layer_raster, layer_attribute in files: 
     
-# # Save as geoTiff
-# with rasterio.open('N:/Data-Master/NVIS/GRID_NVIS6_0_AUST_PRE_MVG/aus6_0p_mvg.tif', 'w+', nodata = 0, dtype = 'uint8', **meta) as dst:
-#     dst.write_band(1, NVIS_raster_clipped)
+    # Read NVIS raster and filter out the groups that should be removed
+    dst_array_xr = xr.load_dataarray(f'{os.path.dirname(gdb_path)}/{layer_raster}.nc')
+    dst_array_xr = dst_array_xr.sel(group=~dst_array_xr.group.isin(rm_names))
+    
+    # Reorder the groups lexicographically
+    dst_array_xr = dst_array_xr.sortby('group')
+    
+    # Optioin-1: Use the index of the largest group value to represent the cell
+    dst_array_xr_argmax = dst_array_xr.argmax(dim='group')     
+    dst_array_xr_argmax_area_ha = np.bincount(dst_array_xr_argmax.values, weights=NLUM_area_mask, minlength=dst_array_xr_argmax.max().values+1)
+    dst_array_xr_argmax_area_ha = pd.DataFrame({'group':dst_array_xr.coords['group'], 'AREA_HA':dst_array_xr_argmax_area_ha})
+    
+    # Option-2: Split each group as a separate layer, which is the percentage [0-100] of the group in each cell
+    dst_array_xr_area_ha = dst_array_xr * NLUM_area_mask[None,:]
+    dst_array_xr_group_area_ha = dst_array_xr_area_ha.sum(dim='cell').compute().to_dataframe(name='AREA_HA').reset_index()
+    
+    # Save xarray DataArray to NetCDF
+    encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}}
+    output_layer_name = layer_raster.replace('_ALB', '')
+    
+    save_path = f'{os.path.dirname(gdb_path)}/{output_layer_name}_LOW_SPATIAL_DETAIL.nc'
+    dst_array_xr_argmax.name = 'data'
+    dst_array_xr_argmax.to_netcdf(save_path, encoding=encoding, engine='h5netcdf')
+    
+    save_path = f'{os.path.dirname(gdb_path)}/{output_layer_name}_HIGH_SPATIAL_DETAIL.nc'
+    dst_array_xr.name = 'data'
+    dst_array_xr.to_netcdf(save_path, encoding=encoding, engine='h5netcdf')
+    
+ 
 
-# # Flatten 2D array to 1D array of valid values only, add NVIS to cell_df dataframe
-# cell_df['NVIS_PRE_EURO_MVG_ID'] = NVIS_raster_clipped[NLUM_mask]
 
-# # Join the lookup table to the cell_df DataFrame
-# cell_df = cell_df.merge(NVIS_MVG_LUT, left_on = 'NVIS_PRE_EURO_MVG_ID', right_on = 'MVG_ID', how = 'left')
-# cell_df.rename(columns = {'Major Vegetation Group':'NVIS_PRE_EURO_MVG_NAME'}, inplace = True)
-# cell_df = cell_df.drop(columns = ['MVG_ID'])
+
+
+# --------------- Get the sum of areas (ha) for pre-1750 ---------------
+
+# Read raw zones and lumap database
+zones = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5', key='cell_zones_df', columns=['CELL_HA'])
+bioph = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5', key = 'cell_biophysical_df', columns=['NATURAL_AREA_INC_WATER'])
+lumap = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', key = 'cell_LU_mapping', columns=['LU_DESC'])
+
+# Get the index of cells that are outside the LUTO study area
+idx_out_LUTO = np.isin(lumap['LU_DESC'], ['Non-agricultural land'])     # shape=6956407, sum=2737674
+idx_in_LUTO_nat = np.isin(lumap['LU_DESC'], ['Unallocated - natural land', 'Beef - natural land', 'Sheep - natural land', 'Dairy - natural land'])
+
+
+# Read NVIS data
+PRE1750_path = 'N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL'
+
+NVIS_pre_mvg_xr_low_spatial_detail = xr.load_dataarray(f'{PRE1750_path}/NVIS7_0_AUST_PRE_MVG_LOW_SPATIAL_DETAIL.nc')
+NVIS_pre_mvs_xr_low_spatial_detail = xr.load_dataarray(f'{PRE1750_path}/NVIS7_0_AUST_PRE_MVS_LOW_SPATIAL_DETAIL.nc')
+NVIS_pre_mvg_xr_high_spatial_detail = xr.load_dataarray(f'{PRE1750_path}/NVIS7_0_AUST_PRE_MVG_HIGH_SPATIAL_DETAIL.nc') / 100  # Convert percentage to fraction
+NVIS_pre_mvs_xr_high_spatial_detail = xr.load_dataarray(f'{PRE1750_path}/NVIS7_0_AUST_PRE_MVS_HIGH_SPATIAL_DETAIL.nc') / 100  # Convert percentage to fraction
+
+# Get the NVIS names
+NVIS_pre_mvg_names = NVIS_pre_mvg_xr_high_spatial_detail.coords['group'].values.tolist()
+NVIS_pre_mvs_names = NVIS_pre_mvs_xr_high_spatial_detail.coords['group'].values.tolist()
+
+
+# --------------- Total vegataion area (ha) pre-1750 ---------------
+
+# ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
+NVIS_pre_mvg_total_ha_low_spatial_detail = np.bincount(
+    NVIS_pre_mvg_xr_low_spatial_detail.values,
+    weights = zones['CELL_HA'].values,
+    minlength = NVIS_pre_mvg_xr_low_spatial_detail.max().values + 1
+)
+
+NVIS_pre_mvs_total_ha_low_spatial_detail = np.bincount(
+    NVIS_pre_mvs_xr_low_spatial_detail.values,
+    weights = zones['CELL_HA'].values,
+    minlength = NVIS_pre_mvs_xr_low_spatial_detail.max().values + 1
+)
+
+NVIS_pre_mvg_total_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvg_names, 'TOTAL_AREA_HA': NVIS_pre_mvg_total_ha_low_spatial_detail})
+NVIS_pre_mvs_total_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvs_names, 'TOTAL_AREA_HA': NVIS_pre_mvs_total_ha_low_spatial_detail})
+
+
+
+
+# ------------- NVIS_SPATIAL_DETAIL == 'HIGH' -------------
+NVIS_pre_mvg_total_ha_high_spatial_detail = NVIS_pre_mvg_xr_high_spatial_detail * zones['CELL_HA'].values[None, :]
+NVIS_pre_mvs_total_ha_high_spatial_detail = NVIS_pre_mvs_xr_high_spatial_detail * zones['CELL_HA'].values[None, :]
+NVIS_pre_mvg_total_ha_df_high_spatial_detail = NVIS_pre_mvg_total_ha_high_spatial_detail.sum(dim='cell').to_dataframe('TOTAL_AREA_HA').reset_index()
+NVIS_pre_mvs_total_ha_df_high_spatial_detail = NVIS_pre_mvs_total_ha_high_spatial_detail.sum(dim='cell').to_dataframe('TOTAL_AREA_HA').reset_index()
+
+
+
+# --------------- Vegataion area outside the LUTO study area ---------------
+
+# Cells outside the LUTO study area, AND, also in natural state
+natural_cells = np.logical_not(bioph['NATURAL_AREA_INC_WATER'].values) # 0 is natural, 1 is non-natural; so we flip the values to make 1 natural
+idx_out_LUTO_natural = idx_out_LUTO & natural_cells
+
+np.save('N:/LUF-Modelling/LUTO2_JZ/TEMP/out.npy',idx_out_LUTO_natural)
+
+
+# ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
+NVIS_pre_mvg_outside_ha_low_spatial_detail = np.bincount(
+    NVIS_pre_mvg_xr_low_spatial_detail.sel(cell=idx_out_LUTO_natural).values, 
+    weights = zones['CELL_HA'].values[idx_out_LUTO_natural],
+    minlength = NVIS_pre_mvg_xr_low_spatial_detail.max().values + 1
+)
+
+
+NVIS_pre_mvs_outside_ha_low_spatial_detail = np.bincount(
+    NVIS_pre_mvs_xr_low_spatial_detail.sel(cell=idx_out_LUTO_natural).values,
+    weights = zones['CELL_HA'].values[idx_out_LUTO_natural],
+    minlength = NVIS_pre_mvs_xr_low_spatial_detail.max().values + 1
+)
+
+NVIS_pre_mvg_outside_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvg_names,'OUTSIDE_LUTO_AREA_HA': NVIS_pre_mvg_outside_ha_low_spatial_detail})
+NVIS_pre_mvs_outside_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvs_names,'OUTSIDE_LUTO_AREA_HA': NVIS_pre_mvs_outside_ha_low_spatial_detail})
+
+
+# ------------- NVIS_SPATIAL_DETAIL == 'HIGH' -------------
+
+NVIS_pre_mvg_outside_ha_high_spatial_detail = NVIS_pre_mvg_xr_high_spatial_detail.sel(cell=idx_out_LUTO_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_natural]     
+NVIS_pre_mvs_outside_ha_high_spatial_detail = NVIS_pre_mvs_xr_high_spatial_detail.sel(cell=idx_out_LUTO_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_natural]     
+NVIS_pre_mvg_outside_ha_df_high_spatial_detail = NVIS_pre_mvg_outside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('OUTSIDE_LUTO_AREA_HA').reset_index()
+NVIS_pre_mvs_outside_ha_df_high_spatial_detail = NVIS_pre_mvs_outside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('OUTSIDE_LUTO_AREA_HA').reset_index()
+
+
+# ------------- Combine 'HIGH' and 'LOW' -------------
+
+# Concatenate the two dataframes
+NVIS_pre_mvg_low_spatial_detail = NVIS_pre_mvg_total_ha_df_low_spatial_detail.merge(NVIS_pre_mvg_outside_ha_df_low_spatial_detail, on='group')
+NVIS_pre_mvg_high_spatial_detail = NVIS_pre_mvg_total_ha_df_high_spatial_detail.merge(NVIS_pre_mvg_outside_ha_df_high_spatial_detail, on='group')
+
+NVIS_pre_mvs_low_spatial_detail = NVIS_pre_mvs_total_ha_df_low_spatial_detail.merge(NVIS_pre_mvs_outside_ha_df_low_spatial_detail, on='group')
+NVIS_pre_mvs_high_spatial_detail = NVIS_pre_mvs_total_ha_df_high_spatial_detail.merge(NVIS_pre_mvs_outside_ha_df_high_spatial_detail, on='group')
+
+# Append a user-defined target column
+NVIS_pre_mvg_low_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
+NVIS_pre_mvg_high_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
+NVIS_pre_mvs_low_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
+NVIS_pre_mvs_high_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
+
+# Save to CSV
+NVIS_pre_mvg_low_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVG_LOW_SPATIAL_DETAIL.csv', index=False)
+NVIS_pre_mvg_high_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVG_HIGH_SPATIAL_DETAIL.csv', index=False)
+NVIS_pre_mvs_low_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVS_LOW_SPATIAL_DETAIL.csv', index=False)
+NVIS_pre_mvs_high_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVS_HIGH_SPATIAL_DETAIL.csv', index=False)
+
+
+
