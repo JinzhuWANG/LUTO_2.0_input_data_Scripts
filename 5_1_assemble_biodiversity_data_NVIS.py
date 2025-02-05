@@ -67,10 +67,10 @@ fiona.listlayers('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL/NVIS_V7_0_A
 
 # Set paths and layer names
 files = [
-    ('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_EXT_ALL/NVIS_V7_0_AUST_EXT.gdb','NVIS7_0_AUST_EXT_MVG_ALB', 'VAT_NVIS7_0_AUST_EXT_MVG_ALB'),
-    ('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_EXT_ALL/NVIS_V7_0_AUST_EXT.gdb','NVIS7_0_AUST_EXT_MVS_ALB', 'VAT_NVIS7_0_AUST_EXT_MVS_ALB'),
     ('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL/NVIS_V7_0_AUST_PRE.gdb','NVIS7_0_AUST_PRE_MVG_ALB', 'VAT_NVIS7_0_AUST_PRE_MVG_ALB'),
-    ('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL/NVIS_V7_0_AUST_PRE.gdb','NVIS7_0_AUST_PRE_MVS_ALB', 'VAT_NVIS7_0_AUST_PRE_MVS_ALB')
+    ('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL/NVIS_V7_0_AUST_PRE.gdb','NVIS7_0_AUST_PRE_MVS_ALB', 'VAT_NVIS7_0_AUST_PRE_MVS_ALB'),
+    ('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_EXT_ALL/NVIS_V7_0_AUST_EXT.gdb','NVIS7_0_AUST_EXT_MVG_ALB', 'VAT_NVIS7_0_AUST_EXT_MVG_ALB'),
+    ('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_EXT_ALL/NVIS_V7_0_AUST_EXT.gdb','NVIS7_0_AUST_EXT_MVS_ALB', 'VAT_NVIS7_0_AUST_EXT_MVS_ALB')
 ]
 
 # Set number of workers for parallel processing
@@ -149,7 +149,7 @@ rm_names = ['Unknown/no data', 'Unknown/No data']
 
 
 # Calculate the sum of all groups for each raster
-for gdb_path, layer_raster, layer_attribute in files: 
+for gdb_path, layer_raster, layer_attribute in files:
     
     # Read NVIS raster and filter out the groups that should be removed
     dst_array_xr = xr.load_dataarray(f'{os.path.dirname(gdb_path)}/{layer_raster}.nc')
@@ -191,9 +191,15 @@ zones = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Sn
 bioph = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5', key = 'cell_biophysical_df', columns=['NATURAL_AREA_INC_WATER'])
 lumap = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', key = 'cell_LU_mapping', columns=['LU_DESC'])
 
-# Get the index of cells that are outside the LUTO study area
+natural_cells = np.logical_not(bioph['NATURAL_AREA_INC_WATER'].values) # 0 is natural, 1 is non-natural; so we flip the values to make 1 natural
+
+# Get the index of cells that are outside the LUTO study area, AND, also in natural state
 idx_out_LUTO = np.isin(lumap['LU_DESC'], ['Non-agricultural land'])     # shape=6956407, sum=2737674
-idx_in_LUTO_nat = np.isin(lumap['LU_DESC'], ['Unallocated - natural land', 'Beef - natural land', 'Sheep - natural land', 'Dairy - natural land'])
+idx_out_LUTO_natural = idx_out_LUTO & natural_cells
+
+# Get the index of cells that are inside the LUTO study area, AND, also in natural state
+idx_in_LUTO_natural = np.isin(lumap['LU_DESC'], ['Beef - natural land', 'Dairy - natural land', 'Sheep - natural land', 'Unallocated - natural land'])
+
 
 
 # Read NVIS data
@@ -238,14 +244,9 @@ NVIS_pre_mvs_total_ha_df_high_spatial_detail = NVIS_pre_mvs_total_ha_high_spatia
 
 
 
+
+
 # --------------- Vegataion area outside the LUTO study area ---------------
-
-# Cells outside the LUTO study area, AND, also in natural state
-natural_cells = np.logical_not(bioph['NATURAL_AREA_INC_WATER'].values) # 0 is natural, 1 is non-natural; so we flip the values to make 1 natural
-idx_out_LUTO_natural = idx_out_LUTO & natural_cells
-
-np.save('N:/LUF-Modelling/LUTO2_JZ/TEMP/out.npy',idx_out_LUTO_natural)
-
 
 # ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
 NVIS_pre_mvg_outside_ha_low_spatial_detail = np.bincount(
@@ -273,6 +274,43 @@ NVIS_pre_mvg_outside_ha_df_high_spatial_detail = NVIS_pre_mvg_outside_ha_high_sp
 NVIS_pre_mvs_outside_ha_df_high_spatial_detail = NVIS_pre_mvs_outside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('OUTSIDE_LUTO_AREA_HA').reset_index()
 
 
+
+
+
+# --------------- Vegataion area inside the LUTO study area ---------------
+
+# ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
+
+NVIS_pre_mvg_inside_ha_low_spatial_detail = np.bincount(
+    NVIS_pre_mvg_xr_low_spatial_detail.sel(cell=idx_in_LUTO_natural).values, 
+    weights = zones['CELL_HA'].values[idx_in_LUTO_natural],
+    minlength = NVIS_pre_mvg_xr_low_spatial_detail.max().values + 1
+)
+
+NVIS_pre_mvs_inside_ha_low_spatial_detail = np.bincount(
+    NVIS_pre_mvs_xr_low_spatial_detail.sel(cell=idx_in_LUTO_natural).values,
+    weights = zones['CELL_HA'].values[idx_in_LUTO_natural],
+    minlength = NVIS_pre_mvs_xr_low_spatial_detail.max().values + 1
+)
+
+NVIS_pre_mvg_inside_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvg_names,'INSIDE_LUTO_AREA_HA': NVIS_pre_mvg_inside_ha_low_spatial_detail})
+NVIS_pre_mvs_inside_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvs_names,'INSIDE_LUTO_AREA_HA': NVIS_pre_mvs_inside_ha_low_spatial_detail})
+
+
+# ------------- NVIS_SPATIAL_DETAIL == 'HIGH' -------------
+NVIS_pre_mvg_inside_ha_high_spatial_detail = NVIS_pre_mvg_xr_high_spatial_detail.sel(cell=idx_in_LUTO_natural) * zones['CELL_HA'].values[None, idx_in_LUTO_natural]
+NVIS_pre_mvs_inside_ha_high_spatial_detail = NVIS_pre_mvs_xr_high_spatial_detail.sel(cell=idx_in_LUTO_natural) * zones['CELL_HA'].values[None, idx_in_LUTO_natural]
+NVIS_pre_mvg_inside_ha_df_high_spatial_detail = NVIS_pre_mvg_inside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('INSIDE_LUTO_AREA_HA').reset_index()
+NVIS_pre_mvs_inside_ha_df_high_spatial_detail = NVIS_pre_mvs_inside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('INSIDE_LUTO_AREA_HA').reset_index()
+
+
+
+
+
+
+
+
+
 # ------------- Combine 'HIGH' and 'LOW' -------------
 
 # Concatenate the two dataframes
@@ -296,3 +334,52 @@ NVIS_pre_mvs_high_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVS_HIGH_SPATIAL_D
 
 
 
+
+# ------------------------- TMP -------------------------
+
+save_path = 'N:/LUF-Modelling/LUTO2_JZ/TEMP/vegetation_pre_calc_area_ha'
+
+# ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
+
+NVIS_pre_mvg_low_spatial_detail_area_ha = pd.concat([
+    NVIS_pre_mvg_total_ha_df_low_spatial_detail.set_index('group'), 
+    NVIS_pre_mvg_outside_ha_df_low_spatial_detail.set_index('group'),
+    NVIS_pre_mvg_inside_ha_df_low_spatial_detail.set_index('group')], axis=1).reset_index()
+
+NVIS_pre_mvg_low_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_AREA_HA'] = NVIS_pre_mvg_low_spatial_detail_area_ha.eval('OUTSIDE_LUTO_AREA_HA	+ INSIDE_LUTO_AREA_HA')
+NVIS_pre_mvg_low_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_to_TOTAL'] = NVIS_pre_mvg_low_spatial_detail_area_ha.eval('INSIDE_OUTSIDE_SUM_AREA_HA / TOTAL_AREA_HA')
+NVIS_pre_mvg_low_spatial_detail_area_ha.to_csv(f'{save_path}/NVIS_pre_mvg_low_spatial_detail_area_ha.csv', index=False)
+
+NVIS_pre_mvg_high_spatial_detail_area_ha = pd.concat([
+    NVIS_pre_mvg_total_ha_df_high_spatial_detail.set_index('group'), 
+    NVIS_pre_mvg_outside_ha_df_high_spatial_detail.set_index('group'),
+    NVIS_pre_mvg_inside_ha_df_high_spatial_detail.set_index('group')], axis=1).reset_index()
+
+NVIS_pre_mvg_high_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_AREA_HA'] = NVIS_pre_mvg_high_spatial_detail_area_ha.eval('OUTSIDE_LUTO_AREA_HA	+ INSIDE_LUTO_AREA_HA')
+NVIS_pre_mvg_high_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_to_TOTAL'] = NVIS_pre_mvg_high_spatial_detail_area_ha.eval('INSIDE_OUTSIDE_SUM_AREA_HA / TOTAL_AREA_HA')
+NVIS_pre_mvg_high_spatial_detail_area_ha.to_csv(f'{save_path}//NVIS_pre_mvg_high_spatial_detail_area_ha.csv', index=False)
+
+
+
+# ------------- NVIS_SPATIAL_DETAIL == 'HIGH' -------------
+
+NVIS_pre_mvs_low_spatial_detail_area_ha = pd.concat([
+    NVIS_pre_mvs_total_ha_df_low_spatial_detail.set_index('group'), 
+    NVIS_pre_mvs_outside_ha_df_low_spatial_detail.set_index('group'),
+    NVIS_pre_mvs_inside_ha_df_low_spatial_detail.set_index('group')], axis=1).reset_index()
+
+NVIS_pre_mvs_low_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_AREA_HA'] = NVIS_pre_mvs_low_spatial_detail_area_ha.eval('OUTSIDE_LUTO_AREA_HA	+ INSIDE_LUTO_AREA_HA')
+NVIS_pre_mvs_low_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_to_TOTAL'] = NVIS_pre_mvs_low_spatial_detail_area_ha.eval('INSIDE_OUTSIDE_SUM_AREA_HA / TOTAL_AREA_HA')
+NVIS_pre_mvs_low_spatial_detail_area_ha.to_csv(f'{save_path}//NVIS_pre_mvs_low_spatial_detail_area_ha.csv', index=False)
+
+
+NVIS_pre_mvs_high_spatial_detail_area_ha = pd.concat([
+    NVIS_pre_mvs_total_ha_df_high_spatial_detail.set_index('group'), 
+    NVIS_pre_mvs_outside_ha_df_high_spatial_detail.set_index('group'),
+    NVIS_pre_mvs_inside_ha_df_high_spatial_detail.set_index('group')], axis=1).reset_index()
+
+NVIS_pre_mvs_high_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_AREA_HA'] = NVIS_pre_mvs_high_spatial_detail_area_ha.eval('OUTSIDE_LUTO_AREA_HA	+ INSIDE_LUTO_AREA_HA')
+NVIS_pre_mvs_high_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_to_TOTAL'] = NVIS_pre_mvs_high_spatial_detail_area_ha.eval('INSIDE_OUTSIDE_SUM_AREA_HA / TOTAL_AREA_HA')
+NVIS_pre_mvs_high_spatial_detail_area_ha.to_csv(f'{save_path}/NVIS_pre_mvs_high_spatial_detail_area_ha.csv', index=False)
+
+# --------------------------  TMP END --------------------------

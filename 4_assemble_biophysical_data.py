@@ -843,32 +843,32 @@ for ssp in ['ssp126', 'ssp245', 'ssp370', 'ssp585']:
 HCAS_path = "N:/Data-Master/Habitat_condition_assessment_system/Data"
 percentiles =[10, 25, 50, 75, 90]
 
+with rasterio.Env(CPL_DEBUG=False):
+    with rasterio.open(f'{HCAS_path}/HCAS_v3.1/processed/HCAS31_HCB_1988_2022.tif') as HCAS_src:
+        
+        # Read the HCAS data
+        HCAS_arr = HCAS_src.read(1)
+        HCAS_meta = HCAS_src.meta.copy()
 
-with rasterio.open(f'{HCAS_path}/HCAS_v3.0/HCAS30_HCB_1988_2022.tif') as HCAS_src:
-    
-    # Read the HCAS data
-    HCAS_arr = HCAS_src.read(1)
-    HCAS_meta = HCAS_src.meta.copy()
-
-    # Read the LUMAP data for year 2010, then reproject and resample it to match HCAS
-    lu_arr_math_HCAS = reproj_resample(
-        f'{HCAS_path}/Processed/lumap_2010.tiff',
-        HCAS_meta,
-        resampling = Resampling.nearest,     # use 'nearest' resampling to upsample the LUMAP data (1km) to match HCAS (250m)
-        fill_nodata = False                  # do not fill nodata when reprojecting LUMAP
-    )
-
-    # Calculate the percentiles
-    HCAS_lumap_percentile = {}
-    for lu_code in np.unique(lu_arr_math_HCAS):
-        # Skip if lu_code is NaN or negative
-        if np.isnan(lu_code) or lu_code < 0:
-            continue
-        # Calculate the percentiles
-        HCAS_lumap_percentile[lu_code] = np.nanpercentile(
-            np.where(lu_arr_math_HCAS == lu_code, HCAS_arr, np.nan),
-            percentiles
+        # Read the LUMAP data for year 2010, then reproject and resample it to match HCAS
+        lu_arr_match_HCAS = reproj_resample(
+            f'{HCAS_path}/Processed/lumap_2010.tiff',
+            HCAS_meta,
+            resampling = Resampling.nearest,     # use 'nearest' resampling to upsample the LUMAP data (1km) to match HCAS (90m)
+            fill_nodata = False                  # do not fill nodata when reprojecting LUMAP
         )
+
+        # Calculate the percentiles
+        HCAS_lumap_percentile = {}
+        for lu_code in np.unique(lu_arr_match_HCAS):
+            # Skip if lu_code is NaN or negative
+            if np.isnan(lu_code) or lu_code < 0:
+                continue
+            # Calculate the percentiles
+            HCAS_lumap_percentile[lu_code] = np.nanpercentile(
+                np.where(lu_arr_match_HCAS == lu_code, HCAS_arr, np.nan),
+                percentiles
+            )
   
         
 # Save the output to CSV
@@ -888,9 +888,9 @@ HCAS_LUMAP_PERCENTILE_df.to_csv(f"{HCAS_path}/Processed/HABITAT_CONDITION.csv")
 # ------------ National Connectivity Index [NCI] (https://data.csiro.au/collection/csiro%3A58717v6) ------------
 
 NCI_reproj_NLUM = reproj_resample(
-    f'{HCAS_path}/HCAS_v3.0/HCAS30_NCIB_1988_2022.tif',
+    f'{HCAS_path}/HCAS_v3.1/4.CONNECTIVITY.CONDITION/NCI/HCAS31_NCIB_1988_2022.tif',
     meta,
-    resampling = Resampling.average,    # use 'average' resampling to downsample the NCI data (250m) to match NLUM (1km)
+    resampling = Resampling.average,    # use 'average' resampling to downsample the NCI data (90m) to match NLUM (1km)
     fill_nodata = True
 )
 
