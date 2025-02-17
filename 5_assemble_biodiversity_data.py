@@ -15,11 +15,29 @@ of xarray to speed up the processing.
 '''
 
 
+import os, re
+import rasterio, fiona
+import xarray as xr
+import rioxarray as rxr
+import numpy as np
+import pandas as pd
+import geopandas as gpd
+
+from glob import glob
+from itertools import product
+from tqdm.auto import tqdm
+from joblib import Parallel, delayed
+from rasterio import features
+from rasterio.warp import reproject
+from pyproj import CRS
+from affine import Affine
 
 
-########################################################################
-#                  Process Biodiversity Data with Xarray               #
-########################################################################
+
+
+################################################################################
+#                  Process Biodiversity Data (Carla) with Xarray               #
+################################################################################
 
 
 # -----------------------------------------------------------------------------------------------------
@@ -40,62 +58,27 @@ The biodiversity data has a structure of:
 - group: 	    {'amphibians', 'birds', 'mammals', 'plants', 'reptiles'}            Use all groups in LUTO
 - species: 	    {'Abelmoschus_ficulneus' ... 'Zyzomys_woodwardi'}                   Use all species in LUTO
 - year: 	    {1990, 2030, 2050, 2070, 2090}                                      Use all years in LUTO
-- mode: 	    {'EnviroSuit', 'EnviroSuit_max', 'EnviroSuit_min', 'historic'}      Use only 'EnviroSuit' in LUTO
+- mode: 	    {'EnviroSuit', 'EnviroSuit_max', 'EnviroSuit_min', 'historic'}      Use 'historic' and 'EnviroSuit' in LUTO
 
 And the data has a metadata of:
 - 808 rows *  978 columns
 - 5km resolution
-- int8 data type
+- uint8 data type
 - nodata value: 255
 - CRS: EPSG:4283
 
 
-To incoporate this data to LUTO, we use xarray to combine all GeoTIFF files into a single NetCDF file. Essentialy, the nc file 
-can be thought as a data cube of 5 dimensions: (year * species, * x * y), with group information attached to the species dimension.
+To incoporate this data to LUTO, we use xarray to combine all GeoTIFF files into a single NetCDF file. Essentialy, the resuting nc file 
+can be thought as a data cube of 4 dimensions: (year * species (group) * x * y), with group information attached to the species dimension.
 '''
 
 
-import os, re
-import netCDF4
-import xarray as xr
-import rioxarray as rxr
-import numpy as np
-import pandas as pd
-
-from glob import glob
-from itertools import product
-from tqdm.auto import tqdm
-from joblib import Parallel, delayed
-from scipy.ndimage import distance_transform_edt
-from rasterio.enums import Resampling
 
 # Global variables
-NLUM = rxr.open_rasterio('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif').squeeze('band').drop_vars('band').astype('uint8')
+NLUM = rxr.open_rasterio('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif').squeeze('band').drop_vars('band').astype('uint8') 
 
 bio_GTIFF_dir  = 'N:/Data-Master/Biodiversity/Environmental-suitability/Annual-species-suitability_20-year_snapshots_5km'
 bio_NetCDF_dir = 'N:/Data-Master/Biodiversity/Environmental-suitability/Annual-species-suitability_20-year_snapshots_5km_to_NetCDF'
-
-
-
-def replace_with_nearest(map_: np.ndarray, filler: int) -> np.ndarray:
-    """
-    Replaces invalid values in the input array with the nearest non-filler values.
-
-    Parameters:
-        map_ (np.ndarray, 2D): The input array.
-        filler (int): The value to be considered as invalid.
-
-    Returns:
-        np.ndarray (2D): The array with invalid values replaced by the nearest non-invalid values.
-    """
-    # Create a mask for invalid values
-    mask = (map_ == filler)
-    # Perform distance transform on the mask
-    _, nearest_indices = distance_transform_edt(mask, return_indices=True)
-    # Replace the invalid values with the nearest non-invalid values
-    map_[mask] = map_[tuple(nearest_indices[:, mask])]
-    
-    return map_
 
 
 def find_str(row: pd.Series) -> list:
@@ -155,34 +138,45 @@ else:
     df = pd.read_csv(f'{bio_NetCDF_dir}/bio_file_paths_raw.csv' )
 
 
-# Create an tempalate biodiversity MASK in netcdf format
-bio_mask = rxr.open_rasterio(df.iloc[0]['path']).squeeze('band').drop_vars('band').astype('uint8')
-bio_mask = xr.where(bio_mask != bio_mask.rio.nodata, 1, 0).astype('uint8')
-bio_mask = bio_mask.rio.write_crs(NLUM.rio.crs)
-bio_mask.name = 'data'
-bio_mask.to_netcdf(
-    f'{bio_NetCDF_dir}/bio_mask.nc', 
-    mode='w', 
-    encoding={'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}},
-    engine='h5netcdf'
-)
+
+# Get the first GeoTIFF file to get the shape of the data
+bio_arr = rxr.open_rasterio(df['path'][0], chunks='auto').sel(band=1).drop_vars('band')
+bio_arr.values = np.arange(bio_arr.sizes['y'] * bio_arr.sizes['x']).reshape(bio_arr.sizes['y'], bio_arr.sizes['x'])
+bio_coord_x = xr.DataArray(bio_arr['x'].values, dims=['x'])
+bio_coord_y = xr.DataArray(bio_arr['y'].values, dims=['y'])
+
+# Calculate the real area for each bio cell in hectares
+results = ({'properties': {'cell_bio': v}, 'geometry': s} for i, (s, v) in enumerate(features.shapes(bio_arr.values, mask = None, transform = bio_arr.rio.transform())))
+rnd_gdf = gpd.GeoDataFrame.from_features(list(results), crs = NLUM.rio.crs)
+rnd_gdf = rnd_gdf.to_crs('EPSG:3577')
+rnd_gdf['CELL_HA'] = rnd_gdf['geometry'].area / 10000
+bio_arr_area_ha = bio_arr.copy()
+bio_arr_area_ha.values = rnd_gdf['CELL_HA'].values.reshape(bio_arr.sizes['y'], bio_arr.sizes['x'])
 
 
-# Create an ID map for the biodiversity data
-id_map = np.arange(bio_mask.size).reshape(bio_mask.shape)
-id_map = xr.DataArray(
-    id_map, 
-    dims=['y', 'x'], 
-    coords={'y': bio_mask.coords['y'], 'x': bio_mask.coords['x']})
+# Read previouse raw data
+zones = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5', key='cell_zones_df', columns=['X', 'Y', 'CELL_HA'])
+bioph = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5', key = 'cell_biophysical_df', columns=['NATURAL_AREA_INC_WATER'])
+lumap = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', key = 'cell_LU_mapping', columns=['LU_DESC'])
 
-id_map = id_map.rio.write_crs(bio_mask.rio.crs)
-id_map = id_map.rio.write_transform(bio_mask.rio.transform())
-id_map = id_map.rio.reproject_match(NLUM, Resampling = Resampling.nearest, nodata=bio_mask.size + 1).chunk('auto')
-    
-id_map.attrs = {}
-id_map.name = 'data'
-encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint32'}} 
-id_map.to_netcdf(f'{bio_NetCDF_dir}/bio_id_map.nc', encoding=encoding, engine='h5netcdf')
+
+# Get the index of cells that are in natural state, and inside/outside the LUTO study area
+natural_cells = np.logical_not(bioph['NATURAL_AREA_INC_WATER'].values)  # 0 is natural, 1 is non-natural; so we flip the values to make 1 natural
+idx_in_LUTO_natural = np.isin(lumap['LU_DESC'], ['Beef - natural land', 'Dairy - natural land', 'Sheep - natural land', 'Unallocated - natural land'])
+idx_out_LUTO = np.isin(lumap['LU_DESC'], ['Non-agricultural land'])     # shape=6956407, sum=2737674
+idx_out_LUTO_natural = idx_out_LUTO & natural_cells
+
+# Convert the index to xarray; 1D with cell as the primary dimension, and y, x as the coordinates
+NLUM_zero = NLUM.copy() * 0
+idx_in_LUTO_natural_2D = NLUM_zero.copy()
+np.place(idx_in_LUTO_natural_2D.values, NLUM.values, idx_in_LUTO_natural.astype('uint8'))
+idx_out_LUTO_natural_2D = NLUM_zero.copy()
+np.place(idx_out_LUTO_natural_2D.values, NLUM.values, idx_out_LUTO_natural.astype('uint8'))
+
+# Get the coordinates of the cells that are in natural state, inside/outside the LUTO study area
+idx_in_LUTO_natural_2D_bio = idx_in_LUTO_natural_2D.interp(x=bio_coord_x, y=bio_coord_y, method='nearest', kwargs={'fill_value': 0}).astype('bool')
+idx_out_LUTO_natural_2D_bio = idx_out_LUTO_natural_2D.interp(x=bio_coord_x, y=bio_coord_y, method='nearest', kwargs={'fill_value': 0}).astype('bool')
+
 
 
 
@@ -192,213 +186,771 @@ id_map.to_netcdf(f'{bio_NetCDF_dir}/bio_id_map.nc', encoding=encoding, engine='h
 # Filter out the ensemble data
 ensemble_df = df.query('model == "GCM-Ensembles" & mode == "EnviroSuit"').drop(columns=['model'])
 valid_species = ensemble_df['species'].unique()                  
-historic_df = df.query('model == "historic" and species.isin(@valid_species) and ~path.str.contains("5x5")')
+historic_df = df.query('model == "historic" and species.isin(@valid_species) and ~path.str.contains("5x5")').sort_values(['group', 'species']).reset_index(drop=True)
 
 
-# Define the function to convert tif to nc
-def process_row(row,bio_mask=bio_mask):
-    ds = rxr.open_rasterio(row['path']).sel(band=1).drop_vars('band')           # Only select the first band
-    ds.values = replace_with_nearest(ds.values, ds.rio.nodata).astype('uint8')  # Replace nodata with nearest valide value
-    ds = ds.expand_dims({'year':[row['year']], 'species':[row['species']]})     # Append year and species as dims
-    ds = ds.assign_coords(group=('species', [row['group']]))                    # Attach group to species dim
-    ds['x'] = bio_mask['x']
-    ds['y'] = bio_mask['y']
-    return ds  
-
-
-def tif_to_nc(df, ssp, mode):
-    # Multi-threading to read TIF and expand dims
-    in_df = df.query(f'ssp == "{ssp}" and mode == "{mode}"')
-    tasks = (delayed(process_row)(row) for _,row in in_df.iterrows())
-    para_obj = Parallel(n_jobs=-1, return_as='generator')
-    return [result for result in tqdm(para_obj(tasks), total=len(in_df))]
-
-        
-# Save ensemble data to nc !!!!!!!!!! This will take ~5 hours to finish !!!!!!!!!!      
-historic_xr = tif_to_nc(historic_df, 'historic', 'historic')
+# Save ensemble data to nc
 for ssp, mode in product(ensemble_df['ssp'].unique(), ensemble_df['mode'].unique()):
-    # Pass if the file already exists
-    if os.path.exists(f'{bio_NetCDF_dir}/bio_{ssp}_{mode}.nc'):
-        print(f'{ssp}_{mode}.nc already exists')
-        continue
-
-    # get the data
-    ensemble_arrs = tif_to_nc(ensemble_df, ssp, mode)
-    ensemble_arrs = xr.combine_by_coords(historic_xr + ensemble_arrs, fill_value=0, combine_attrs='drop')
-
-    # Save to nc
-    encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}} 
-    ensemble_arrs.name = 'data'
-    ensemble_arrs.to_netcdf(f'{bio_NetCDF_dir}/bio_{ssp}_{mode}.nc', mode='w', encoding=encoding, engine='h5netcdf')
-
-    del ensemble_arrs
-
-
-# -------------------- Calculate biodiversity contribution ------------------------------------------
-
-# Search for biodiversity NetCDF files
-n_chunks = 1000
-n_workers = 15
-bio_raw_ncs = glob(f'{bio_NetCDF_dir}/*EnviroSuit.nc')
-bio_xr_mask = xr.open_dataset(f'{bio_NetCDF_dir}/bio_mask.nc')['data'].astype(np.bool_)
-  
-# Save nc to disk
-for nc in bio_raw_ncs:
-    fname = os.path.basename(nc).replace('EnviroSuit', 'Condition').replace('.nc', '')
-    bio_xr_raw = xr.open_dataset(nc, chunks='auto')['data']
-
-    # Calculate the biodiversity contribution scores for each species.
-    # Contribution is the percentage of each cell's value to the sum of whole layer for 1990
-    def process_chunks(data, sel_species):
-        return (data.sel(species=sel_species) 
-                / (data.sel(year=1990, species=sel_species).astype('uint64') * bio_xr_mask).sum(['x', 'y'])
-                * 100).astype(np.float32).compute()
-        
-    tasks = [
-        delayed(process_chunks)(bio_xr_raw, sel_species) 
-        for sel_species in np.array_split(bio_xr_raw['species'].values, n_chunks)
-    ]
     
-    bio_species_contributions = xr.combine_by_coords(list(
-        tqdm(Parallel(n_jobs=n_workers, return_as='generator')(tasks), total=n_chunks))
+    # Get all the data for the given ssp and mode
+    in_df = ensemble_df.query(f'ssp == "{ssp}" and mode == "{mode}"')
+    in_df = pd.concat([historic_df, in_df])
+    in_df = in_df.sort_values(['year', 'species']).reset_index(drop=True)
+    
+    # Create an empty array to store the data
+    ensemble_arr = xr.DataArray(
+        np.zeros((
+            df['year'].nunique(),  
+            len(historic_df['species']), 
+            bio_arr.sizes['y'], 
+            bio_arr.sizes['x']), dtype='uint8'
+        ), 
+        dims=['year', 'species', 'y', 'x'], 
+        coords={
+            'year':sorted(df['year'].unique()),
+            'species':historic_df['species'], 
+            'y':bio_arr['y'],
+            'x':bio_arr['x'],
+            'group': ('species', historic_df['group'])
+        }
     )
     
-    bio_species_contributions.to_netcdf(
-        f'{bio_NetCDF_dir}/{fname}.nc', 
+    # Parallel processing put the data into the empty array
+    def get_arr(row):
+        ds = rxr.open_rasterio(row['path']).sel(band=1).drop_vars('band')
+        ds = xr.where(ds == ds.rio.nodata, 0, ds)
+        return row['year'], row['species'], ds.values
+
+    tasks = (delayed(get_arr)(row) for _,row in in_df.iterrows())
+
+    for year,species,arr in tqdm(Parallel(n_jobs=-1, return_as='generator')(tasks), total=len(in_df)):
+        ensemble_arr.loc[year, species] = arr
+
+
+    # Save to nc, chunked by year, species, leave x, y as unlimited
+    ensemble_arr.name = 'data'
+    ensemble_arr.to_netcdf(
+        f'{bio_NetCDF_dir}/bio_{ssp}_{mode}.nc', 
         mode='w', 
-        encoding={'data': {'compression': 'gzip', 'compression_opts': 9, 'dtype': 'float32'}}, 
+        encoding={'data': {
+            "compression": "gzip", 
+            "compression_opts": 9,  
+            "dtype": 'uint8',
+            "chunksizes": (1, 1, ensemble_arr.sizes['y'], ensemble_arr.sizes['x'])}}, 
         engine='h5netcdf'
     )
-    
-    del bio_species_contributions
-    
-    
+
+    del ensemble_arr
+
+
+
 # -------------------- Calculate biodiversity contribution by group ------------------------------------------
 
 # Search for biodiversity NetCDF files
-n_workers = 15
-bio_condition_ncs = glob(f'{bio_NetCDF_dir}/*Condition.nc')
+bio_suitability_ncs = glob(f'{bio_NetCDF_dir}/*_EnviroSuit.nc')
   
 # Save nc to disk
-for nc in bio_condition_ncs:
+for nc in bio_suitability_ncs:
+
     
-    fname = os.path.basename(nc).replace('.nc', '')
-    bio_species_contributions = xr.open_dataset(nc, chunks='auto')['data']
+    fname = os.path.basename(nc).replace('_EnviroSuit.nc', '_Condition')
+    bio_species_suitability = xr.open_dataset(nc, chunks={'year':1, 'species':1})['data']
+    years = set(bio_species_suitability['year'].values)
+    groups = set(bio_species_suitability['group'].values)
+    
+    # Create an empty array to store the data
+    group_arr_contribution = xr.DataArray(
+        np.zeros((
+            len(years),  
+            len(groups), 
+            bio_species_suitability.sizes['y'], 
+            bio_species_suitability.sizes['x']), dtype='float32'
+        ), 
+        dims=['year', 'group', 'y', 'x'], 
+        coords={
+            'year':sorted(years),
+            'group':sorted(groups), 
+            'y':bio_species_suitability['y'],
+            'x':bio_species_suitability['x']
+        }
+    )
     
     # Calculate the biodiversity contribution scores for each group
-    def process_chunks(data, sel_group):
-        return data.sel(group=sel_group).mean('species').compute()
-    
-    tasks = [
-        delayed(process_chunks)(bio_species_contributions, sel_group)
-        for sel_group in set(bio_species_contributions['group'].values)
-    ]
+    for sel_group in groups:
+        
+        group_arr = bio_species_suitability.groupby('group')[sel_group]
+        # Divide by the number of species to avoide large number overflows in later sum calculation
+        group_arr = group_arr.astype('float32') / group_arr.sizes['species']        
+        # Calculate the contribution of the group to the total biodiversity
+        group_arr_contr = group_arr.sum('species') / group_arr.sel(year=1990, drop=True).sum(['species', 'y', 'x'])
+        # Multiply by the real area (ha) to get the area weighted contribution
+        group_arr_contribution.loc[:, sel_group] = group_arr_contr.values * bio_arr_area_ha
 
-    bio_contribution_group = xr.combine_by_coords(list(
-        tqdm(Parallel(n_jobs=min(len(tasks), n_workers), return_as='generator')(tasks), total=len(tasks)))
-    )
 
-    bio_contribution_group.to_netcdf(
+    # Save to nc, chunked by year, group, leave x, y as unlimited
+    group_arr_contribution.name = 'data'
+    group_arr_contribution.to_netcdf(
         f'{bio_NetCDF_dir}/{fname}_group.nc', 
         mode='w', 
-        encoding={'data': {'compression': 'gzip', 'compression_opts': 9, 'dtype': 'float32'}}, 
+        encoding={'data': {
+            'compression': 'gzip', 
+            'compression_opts': 9, 
+            'dtype': 'float32',
+            'chunksizes': (1, 1, group_arr_contribution.sizes['y'], group_arr_contribution.sizes['x'])}}, 
         engine='h5netcdf'
     )
     
-    del bio_contribution_group
+    del group_arr_contribution
 
 
 
 
-# -------------------- Reproject group biodiversity contribution to 1km ------------------------------------------
+# ------------------- Calculate the biodiversity score for each species ------------------------------------------
 
-bio_suitablity_nc = glob(f'{bio_NetCDF_dir}/*Condition_group.nc')
+# Calculate the contribution, with real_area weighted
+bio_condition_ncs = glob(f'{bio_NetCDF_dir}/*_EnviroSuit.nc')
 
-for nc in bio_suitablity_nc:
+for nc in bio_condition_ncs:
     
-    fname = os.path.basename(nc).replace('.nc', '')
-    
+    fname = os.path.basename(nc).replace('_EnviroSuit.nc', '_Condition')
+    # Biodiversity scores for ALL Australia, inside LUTO study area, and outside LUTO study area
+    score_sources = ['all', 'in', 'out']
     # Read the data
-    bio_xr = xr.open_dataset(nc, chunks='auto')['data']
-    bio_xr = bio_xr.rio.write_crs(NLUM.rio.crs)
-    
-    # Reproject the data to 1km using parallel processing
-    def reproject_chunk(from_arr, to_arr, year, group):
-        reproj_arr = from_arr.rio.reproject_match(to_arr, Resampling = Resampling.bilinear, nodata=0)
-        return reproj_arr.expand_dims({'year':[year], 'group':[group]})
-    
+    bio_suitability = xr.open_dataarray(nc, chunks={'year':1,'group':1})
+
+    # Calculate the biodiversity score for each species
+    bio_suitability_sum = xr.DataArray(
+        np.zeros((bio_suitability.sizes['year'], bio_suitability.sizes['species'], len(score_sources)), dtype='float32'),
+        dims=['year', 'species', 'source'],
+        coords={'year':bio_suitability['year'], 'species':bio_suitability['species'], 'source':score_sources}
+    )
+
+    def get_val(sel_year, sel_species):
+        arr = bio_suitability.sel(year=sel_year, species=sel_species).compute()
+        all_sum = arr.sum(['y', 'x'])
+        in_sum = arr.where(idx_in_LUTO_natural_2D_bio).sum(['y', 'x'])
+        out_sum = arr.where(idx_out_LUTO_natural_2D_bio).sum(['y', 'x'])
+        return sel_year, sel_species, all_sum, in_sum.values, out_sum.values
+        
     tasks = [
-        delayed(reproject_chunk)(bio_xr.sel(year=year, group=group), NLUM, year, group)
-        for group in bio_xr['group'].values
-        for year in bio_xr['year'].values
+        delayed(get_val)(yr, sp) 
+        for sp in bio_suitability['species']
+        for yr in bio_suitability['year']
     ]
+    for yr, sp, val_sum, val_in, val_out in tqdm(Parallel(n_jobs=-1, return_as='generator')(tasks), total=len(tasks)):
+        bio_suitability_sum.loc[yr, sp] = [val_sum, val_in, val_out]
+
+    # Save to csv
+    bio_suitability_sum.to_dataframe('BIO_SCORE_HA').reset_index().to_csv(f'{bio_NetCDF_dir}/{fname}.csv', index=False)
+
+
+
+
+# Get the biodiversity score for the baseline year (1990), as well as the in/out LUTO scores
+bio_in_and_out = pd.DataFrame()
+
+for bio_scores in glob(f'{bio_NetCDF_dir}/*_Condition.csv'):
     
-    bio_xr = xr.combine_by_coords(list(
-        tqdm(Parallel(n_jobs=min(n_workers, len(tasks)),return_as='generator')(tasks), total=len(tasks)))
+    ssp = re.compile(r'bio_ssp(\d*)_').findall(bio_scores)[0]
+    bio_baseline = pd.read_csv(bio_scores).query('year == 1990').query('source == "all"')
+    bio_out = pd.read_csv(bio_scores).query('year != 1990').query('source == "out"')
+    
+    
+    # Combine baseline and in/out LUTO scores
+    bio_df = pd.concat([bio_baseline, bio_out], ignore_index=True).sort_values(['species', 'source', 'year'])
+    bio_df['SSP'] = ssp
+    bio_in_and_out = pd.concat([bio_in_and_out, bio_df])
+    
+# Save to disk
+bio_in_and_out.to_csv(f'{bio_NetCDF_dir}/BIODIVERSITY_GBF4A_SCORES.csv', index=False)
+
+bio_target = pd.DataFrame({
+    'species':bio_in_and_out['species'].unique(), 
+    'USER_DEFINED_TARGET_PERCENT':np.nan}
+)
+
+bio_target.to_csv(f'{bio_NetCDF_dir}/BIODIVERSITY_GBF4A_TARGET.csv', index=False)
+
+
+
+
+
+################################################################################
+#           Process Biodiversity Data (DCCEEW) with Xarray                     #
+################################################################################
+
+
+# ------------------- Rasterise SNES/ECNES data to GEOTIFF ------------------------------------------
+
+
+# Set parameters
+n_workers = 50
+SNES_TIF_PATH = 'N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF'
+
+
+# Read the reference raster data
+ref_mask = NLUM.values
+ref_meta = {
+    'driver': 'GTiff',
+    'dtype': 'uint8',
+    'nodata': 255,
+    'width': NLUM.rio.width,
+    'height': NLUM.rio.height,
+    'count': 1,
+    'crs': NLUM.rio.crs,
+    'transform': NLUM.rio.transform(),
+    'compress': 'lzw',  
+}
+
+
+# Read the SNES biodiversity data
+snes = gpd.read_file("N:/Data-Master/Biodiversity/DCCEEW/snes_public_gdb.gdb", driver="OpenFileGDB", layer="SNES_Public")
+ecnes = gpd.read_file("N:/Data-Master/Biodiversity/DCCEEW/ECnes_public_gdb.gdb", driver="OpenFileGDB", layer="ECnes_public")
+
+# Define the k-v pair for presence 
+presence_dict = {1: 'MAYBE', 2: 'LIKELY'}
+
+# Dissolve to merge, and save the dissolved data
+snes_dissolve = snes.dissolve(by=['SCIENTIFIC_NAME','PRESENCE_CATEGORY']).reset_index()
+ecnes_dissolve = ecnes.dissolve(by=['COMMUNITY', 'CATEGORY']).reset_index()
+
+if not os.path.exists(f"{SNES_TIF_PATH}/snes_dissolve.geojson"):
+    snes_dissolve.to_file(f"{SNES_TIF_PATH}/DISSOLVED_VECTOR/snes_dissolve.geojson")
+if not os.path.exists(f"{SNES_TIF_PATH}/ecnes_dissolve.geojson"):
+    ecnes_dissolve.to_file(f"{SNES_TIF_PATH}/DISSOLVED_VECTOR/ecnes_dissolve.geojson")
+
+
+def get_presVal_savePath(row):
+    # Get value for rasterisation polygon (1 for 'maybe present', 2 for 'likely present')
+    if 'PRES_RANK' in row:  # ECNES data
+        val = row['PRES_RANK']
+        name = row['COMMUNITY'].replace('/', '_')
+        save_path = f'{SNES_TIF_PATH}/ECNES/{name}_{presence_dict[val]}.tif'
+    else:                   # SNES data
+        val = row['PRESENCE_RANK']
+        name = row['SCIENTIFIC_NAME'].replace('/', '_')
+        save_path = f'{SNES_TIF_PATH}/SNES/{row["TAXON_GROUP"]}/{name}/{name}_{presence_dict[val]}.tif'
+    
+    # Replace spaces with underscores
+    save_path = save_path.replace(' ', '_')
+    return val, save_path
+
+
+
+# Function to rasterise the data, note here converting the rasterised data to boolean
+def rasterize(row):
+    val, save_path = get_presVal_savePath(row)
+    # Rasterise the polygon
+    arr = rasterio.features.rasterize(
+        [(row["geometry"], val)],
+        out_shape=ref_mask.shape,
+        transform=ref_meta['transform'],
+        all_touched=False,
+        dtype='uint8',
+    )
+    # Apply mask, 255 will be used for nodata
+    arr = np.where(ref_mask, arr, 255)
+    # Save to GEOTIFF
+    with rasterio.open(save_path, 'w', **ref_meta) as dst:
+        dst.write(arr, 1)
+        
+
+
+# Create folders for SNES data
+for _,row in snes_dissolve.iterrows():
+    tif_path = get_presVal_savePath(row)[1]
+    folder = os.path.dirname(tif_path)
+    if os.path.exists(folder):
+        continue
+    os.makedirs(folder, exist_ok=True)
+    
+# Create folders for ECNES data; Only a single folder to store all the data
+if not os.path.exists(f'{SNES_TIF_PATH}/ECNES'):
+    os.makedirs(f'{SNES_TIF_PATH}/ECNES', exist_ok=True)
+    
+    
+
+# Rasterise and save the SNES data to GEOTIFF
+tasks = [delayed(rasterize)(row) for _,row in snes_dissolve.iterrows()]
+for _ in tqdm(Parallel(n_jobs=n_workers, return_as='generator')(tasks), total=len(tasks)):
+    pass
+
+# Save SNES attributes to csv
+snes_meta = snes_dissolve.copy().drop(columns='geometry')
+snes_meta['TIF_PATH'] = snes_meta.apply(lambda x: get_presVal_savePath(x)[1], axis=1)
+snes_meta.to_csv(f'{SNES_TIF_PATH}/DCCEEW_SNES_meta.csv', index=False)
+
+
+
+# Rasterise and save the ECNES data to GEOTIFF
+tasks = [delayed(rasterize)(row) for _,row in ecnes_dissolve.iterrows()]
+
+raster_arr = []
+for out in tqdm(Parallel(n_jobs=n_workers, return_as='generator')(tasks), total=len(tasks)):
+    raster_arr.append(out)
+
+# Save ECNES attributes to csv
+ecnes_meta = ecnes_dissolve.copy().drop(columns='geometry')
+ecnes_meta['TIF_PATH'] = ecnes_meta.apply(lambda x: get_presVal_savePath(x)[1], axis=1)
+ecnes_meta.to_csv(f'{SNES_TIF_PATH}/DCCEEW_ECNES_meta.csv', index=False)
+
+
+
+
+
+
+# ------------------- Masking GEOTIFFs and save SNES to NetCDF ------------------------------------------
+
+bio_DCCEEW_dir = 'N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF/To_NetCDF'
+
+# Read DCCEEW SNES GeoTIFF file paths
+SNES_meta = pd.read_csv('N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF/DCCEEW_SNES_meta.csv')
+ECNES_meta = pd.read_csv('N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF/DCCEEW_ECNES_meta.csv')
+
+
+# Create an empty array to store the data
+SNES_arr = xr.DataArray(
+    np.zeros((len(SNES_meta), NLUM.sum().values), dtype=np.bool_), 
+    dims=['species', 'cell'], 
+    coords={'species':SNES_meta['SCIENTIFIC_NAME'], 'cell':np.arange(NLUM.sum().values)}
+).assign_coords({
+    k: ('species', v.tolist())
+    for k, v in SNES_meta.items()
+    if k not in ['SCIENTIFIC_NAME', 'TIF_PATH']
+})
+
+
+# Parallel processing put the data into the empty array
+def get_arr(row):
+    ds = rxr.open_rasterio(row['TIF_PATH']).sel(band=1).drop_vars('band')
+    ds = xr.where(ds == ds.rio.nodata, 0, ds)
+    ds = xr.where(ds.isin([1, 2]), 1, 0)        # 1 is 'MAYBE', 2 is 'LIKELY'. We convert them to 1 so that we can use bool_ type
+    ds = ds.values.ravel()[np.flatnonzero(NLUM.values)]
+    return row['SCIENTIFIC_NAME'], ds
+
+tasks = (delayed(get_arr)(row) for _,row in SNES_meta.iterrows())
+for species,arr in tqdm(Parallel(n_jobs=-1, return_as='generator')(tasks), total=len(SNES_meta)):
+    SNES_arr.loc[species] = arr
+
+
+# Save to nc, chunked by year, species, leave x, y as unlimited
+SNES_arr.name = 'data'
+SNES_arr.to_netcdf(
+    f'{bio_DCCEEW_dir}/bio_DCCEEW_SNES.nc', 
+    mode='w', 
+    encoding={'data': {
+        "compression": "gzip", 
+        "compression_opts": 9,  
+        "dtype": 'bool',
+        "chunksizes": (1, SNES_arr.sizes['cell'])}}, 
+    engine='h5netcdf'
+)
+
+
+
+# ------------------- Masking GEOTIFFs and save ECNES to NetCDF ------------------------------------------
+
+# Read DCCEEW ECNES GeoTIFF file paths
+ECNES_meta = pd.read_csv('N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF/DCCEEW_ECNES_meta.csv')
+
+# Create an empty array to store the data
+ECNES_arr = xr.DataArray(
+    np.zeros((len(ECNES_meta), NLUM.sum().values), dtype=np.bool_), 
+    dims=['species', 'cell'], 
+    coords={'species':ECNES_meta['COMMUNITY'], 'cell':np.arange(NLUM.sum().values)}
+).assign_coords({
+    k: ('species', v.tolist())
+    for k, v in ECNES_meta.items() 
+    if k not in ['COMMUNITY', 'TIF_PATH']}
+)
+
+
+# Parallel processing put the data into the empty array
+def get_arr(row):
+    ds = rxr.open_rasterio(row['TIF_PATH']).sel(band=1).drop_vars('band')
+    ds = xr.where(ds == ds.rio.nodata, 0, ds)
+    ds = xr.where(ds.isin([1, 2]), 1, 0)        # 1 is 'MAYBE', 2 is 'LIKELY'. We convert them to 1 so that we can use bool_ type
+    ds = ds.values.ravel()[np.flatnonzero(NLUM.values)]
+    return row['COMMUNITY'], ds
+
+tasks = (delayed(get_arr)(row) for _,row in ECNES_meta.iterrows())
+for species,arr in tqdm(Parallel(n_jobs=10, return_as='generator')(tasks), total=len(ECNES_meta)):
+    ECNES_arr.loc[species] = arr
+
+
+# Save to nc, chunked by year, species, leave x, y as unlimited
+ECNES_arr.name = 'data'
+ECNES_arr.to_netcdf(
+    f'{bio_DCCEEW_dir}/bio_DCCEEW_ECNES.nc', 
+    mode='w', 
+    encoding={'data': {
+        "compression": "gzip", 
+        "compression_opts": 9,  
+        "dtype": 'bool',
+        "chunksizes": (1, ECNES_arr.sizes['cell'])}}, 
+    engine='h5netcdf'
+)
+
+
+
+
+
+################################################################################
+#           Process Biodiversity Data (NVIS) with Xarray                       #
+################################################################################
+
+
+'''
+Reproject NVIS Extant + Pre-European Major Vegetation Groups and Subgroups rasters to match NLUM, save to GeoTiff and NetCDF
+'''
+
+mask_GEOTIFF = 'N:/Data-Master/National_Landuse_Map/NLUM_2010-11_clip.tif'
+area_ha_GEOTIFF = 'N:/Data-Master/National_Landuse_Map/NLUM_2010-11_cell_ha.tif'
+
+# Get metadata from mask_GEOTIFF
+with rasterio.open(mask_GEOTIFF) as rst:
+    # Load a 2D masked array with nodata masked out
+    NLUM_ID_raster = rst.read(1, masked=True) 
+    NLUM_mask = NLUM_ID_raster.mask == False
+    # Get metadata and update parameters
+    NLUM_transform = rst.transform
+    NLUM_crs = rst.crs
+    meta = rst.meta.copy()
+    meta.update(compress='lzw', driver='GTiff') # , dtype='int32', nodata='0')
+    [meta.pop(key) for key in ['dtype', 'nodata', 'count', 'driver']] # Need to add dtype and nodata manually when exporting GeoTiffs
+
+# Get real area in hectares from area_ha_GEOTIFF
+with rasterio.open(area_ha_GEOTIFF) as rst:
+    NLUM_area = rst.read(1)
+    NLUM_area_mask = NLUM_area[NLUM_mask]
+    
+
+############## Functions
+
+def reproject_and_average(val:int, src_arr:np.ndarray, src_trans:Affine, src_crs:CRS, target_meta:dict):
+    zero_arr = np.zeros((meta.get('height'), meta.get('width')), np.float32)
+    band_arr = (src_arr == val).astype(np.uint8)
+    reproject(
+        band_arr, 
+        zero_arr, 
+        resampling=rasterio.enums.Resampling.average, 
+        src_transform=src_trans, 
+        src_crs=src_crs, 
+        dst_transform=target_meta.get('transform'), 
+        dst_crs=target_meta.get('crs')
+    )
+    return np.round(zero_arr * 100, 0).astype(np.uint8)
+
+
+############## List raster layers in NVIS geoDatabase folder
+
+# Present Vegetation Groups and Subgroups
+fiona.listlayers('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_EXT_ALL/NVIS_V7_0_AUST_EXT.gdb')
+     
+# Pre1750 Vegetation Groups and Subgroups
+fiona.listlayers('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL/NVIS_V7_0_AUST_PRE.gdb')
+
+
+# Set paths and layer names
+files = [
+    ('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL/NVIS_V7_0_AUST_PRE.gdb','NVIS7_0_AUST_PRE_MVG_ALB', 'VAT_NVIS7_0_AUST_PRE_MVG_ALB'),
+    ('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL/NVIS_V7_0_AUST_PRE.gdb','NVIS7_0_AUST_PRE_MVS_ALB', 'VAT_NVIS7_0_AUST_PRE_MVS_ALB'),
+    ('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_EXT_ALL/NVIS_V7_0_AUST_EXT.gdb','NVIS7_0_AUST_EXT_MVG_ALB', 'VAT_NVIS7_0_AUST_EXT_MVG_ALB'),
+    ('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_EXT_ALL/NVIS_V7_0_AUST_EXT.gdb','NVIS7_0_AUST_EXT_MVS_ALB', 'VAT_NVIS7_0_AUST_EXT_MVS_ALB')
+]
+
+# Set number of workers for parallel processing
+n_workers = 10
+
+# Loop through each raster layer and reproject to match NLUM
+for gdb_path, layer_raster, layer_attribute in files:
+    
+    # Read NVIS raster and reproject to match NLUM
+    with rasterio.open(f'OpenFileGDB:{gdb_path}:{layer_raster}') as src: 
+        src_arr = src.read(1)
+    # Load in look-up tables of MVG and MVS names
+    src_att = gpd.read_file(gdb_path, layer=layer_attribute)
+    # Rename column that contains 'NAME' to 'NAME'
+    src_att = src_att.rename(columns={src_att.filter(like='NAME').columns[0]: 'NAME'})
+    src_att = src_att[['Value', 'NAME']]
+    src_att.to_csv(f'{os.path.dirname(gdb_path)}/{layer_raster}_lookup.csv', index=False)
+
+
+    # Create a list of delayed jobs, so we can reproject and average rasters in parallel with `n_workers`
+    jobs = [delayed(reproject_and_average)(val, src_arr, src.transform, src.crs, meta) for val in src_att['Value']]
+    dst_array = np.stack(Parallel(n_jobs=n_workers)(jobs), axis=0)
+    
+    
+    # Save reprojected raster to GeoTiff
+    save_path = f'{os.path.dirname(gdb_path)}/{layer_raster}.tif'
+    with rasterio.open(save_path, 'w', **meta, PROFILE='GEOTIFF', count=dst_array.shape[0], dtype=dst_array.dtype) as dst:
+        # Write each band to the raster
+        for i in range(dst_array.shape[0]):
+            dst.write(dst_array[i], i+1)
+        # Set band descriptions
+        dst.descriptions = tuple(src_att['Value'].astype(str).str.zfill(2).values)
+        
+
+    # Get the cells based on NLUM mask
+    dst_array_flat = dst_array[:,NLUM_mask]
+    # Create xarray DataArray with group and cell dimensions
+    dst_array_xr = xr.DataArray(
+        dst_array_flat, 
+        dims=['group', 'cell'], 
+        coords={'group':src_att['NAME'], 'cell':np.arange(dst_array_flat.shape[1])}
     )
     
-    # Apply NLUM mask
-    sel_y = xr.DataArray(np.nonzero(NLUM)[0].values, dims='cell')
-    sel_x = xr.DataArray(np.nonzero(NLUM)[1].values, dims='cell')
-    bio_xr = bio_xr['data'].isel(y=sel_y, x=sel_x)
-
-
-    bio_xr.to_netcdf(
-        f'{bio_NetCDF_dir}/{fname}_1km.nc', 
-        mode='w', 
-        encoding={'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'float32'}},
-        engine='h5netcdf'
-    )
     
-    del bio_xr
+    # Save xarray DataArray to NetCDF
+    save_path = f'{os.path.dirname(gdb_path)}/{layer_raster}.nc'
+    encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}} 
+    dst_array_xr.name = 'data'
+    dst_array_xr.to_netcdf(save_path, encoding=encoding, engine='h5netcdf')
+
+
+
+
+# --------------- Remove invalid vegetation class; Apply spatial mask ---------------
+
+# Get group names for both pre-European and extant vegetation
+PRE_mvg_groups = pd.read_csv('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL/NVIS7_0_AUST_PRE_MVG_ALB_lookup.csv')['NAME'].tolist()
+PRE_mvs_groups = pd.read_csv('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL/NVIS7_0_AUST_PRE_MVS_ALB_lookup.csv')['NAME'].tolist()
+EXT_mvg_groups = pd.read_csv('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_EXT_ALL/NVIS7_0_AUST_EXT_MVG_ALB_lookup.csv')['NAME'].tolist()
+EXT_mvs_groups = pd.read_csv('N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_EXT_ALL/NVIS7_0_AUST_EXT_MVS_ALB_lookup.csv')['NAME'].tolist()
+
+
+# Some groups are undertmined and should be exclude from the analysis, such as 'Other ...', 'Unknown/no data', and 'Unclassified'.
+rm_names = ['Unknown/no data', 'Unknown/No data']
+
+
+# Calculate the sum of all groups for each raster
+for gdb_path, layer_raster, layer_attribute in files:
+    
+    # Read NVIS raster and filter out the groups that should be removed
+    dst_array_xr = xr.load_dataarray(f'{os.path.dirname(gdb_path)}/{layer_raster}.nc')
+    dst_array_xr = dst_array_xr.sel(group=~dst_array_xr.group.isin(rm_names))
+    
+    # Reorder the groups lexicographically
+    dst_array_xr = dst_array_xr.sortby('group')
+    
+    # Optioin-1: Use the index of the largest group value to represent the cell
+    dst_array_xr_argmax = dst_array_xr.argmax(dim='group')     
+    dst_array_xr_argmax_area_ha = np.bincount(dst_array_xr_argmax.values, weights=NLUM_area_mask, minlength=dst_array_xr_argmax.max().values+1)
+    dst_array_xr_argmax_area_ha = pd.DataFrame({'group':dst_array_xr.coords['group'], 'AREA_HA':dst_array_xr_argmax_area_ha})
+    
+    # Option-2: Split each group as a separate layer, which is the percentage [0-100] of the group in each cell
+    dst_array_xr_area_ha = dst_array_xr * NLUM_area_mask[None,:]
+    dst_array_xr_group_area_ha = dst_array_xr_area_ha.sum(dim='cell').compute().to_dataframe(name='AREA_HA').reset_index()
+    
+    # Save xarray DataArray to NetCDF
+    encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}}
+    output_layer_name = layer_raster.replace('_ALB', '')
+    
+    save_path = f'{os.path.dirname(gdb_path)}/{output_layer_name}_LOW_SPATIAL_DETAIL.nc'
+    dst_array_xr_argmax.name = 'data'
+    dst_array_xr_argmax.to_netcdf(save_path, encoding=encoding, engine='h5netcdf')
+    
+    save_path = f'{os.path.dirname(gdb_path)}/{output_layer_name}_HIGH_SPATIAL_DETAIL.nc'
+    dst_array_xr.name = 'data'
+    dst_array_xr.to_netcdf(save_path, encoding=encoding, engine='h5netcdf')
+    
+ 
+
+
+
+
+# --------------- Get the sum of areas (ha) for pre-1750 ---------------
+
+# Read raw zones and lumap database
+zones = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5', key='cell_zones_df', columns=['CELL_HA'])
+bioph = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5', key = 'cell_biophysical_df', columns=['NATURAL_AREA_INC_WATER'])
+lumap = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', key = 'cell_LU_mapping', columns=['LU_DESC'])
+
+natural_cells = np.logical_not(bioph['NATURAL_AREA_INC_WATER'].values) # 0 is natural, 1 is non-natural; so we flip the values to make 1 natural
+
+# Get the index of cells that are outside the LUTO study area, AND, also in natural state
+idx_out_LUTO = np.isin(lumap['LU_DESC'], ['Non-agricultural land'])     # shape=6956407, sum=2737674
+idx_out_LUTO_natural = idx_out_LUTO & natural_cells
+
+# Get the index of cells that are inside the LUTO study area, AND, also in natural state
+idx_in_LUTO_natural = np.isin(lumap['LU_DESC'], ['Beef - natural land', 'Dairy - natural land', 'Sheep - natural land', 'Unallocated - natural land'])
+
+
+
+# Read NVIS data
+PRE1750_path = 'N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL'
+
+NVIS_pre_mvg_xr_low_spatial_detail = xr.load_dataarray(f'{PRE1750_path}/NVIS7_0_AUST_PRE_MVG_LOW_SPATIAL_DETAIL.nc')
+NVIS_pre_mvs_xr_low_spatial_detail = xr.load_dataarray(f'{PRE1750_path}/NVIS7_0_AUST_PRE_MVS_LOW_SPATIAL_DETAIL.nc')
+NVIS_pre_mvg_xr_high_spatial_detail = xr.load_dataarray(f'{PRE1750_path}/NVIS7_0_AUST_PRE_MVG_HIGH_SPATIAL_DETAIL.nc') / 100  # Convert percentage to fraction
+NVIS_pre_mvs_xr_high_spatial_detail = xr.load_dataarray(f'{PRE1750_path}/NVIS7_0_AUST_PRE_MVS_HIGH_SPATIAL_DETAIL.nc') / 100  # Convert percentage to fraction
+
+# Get the NVIS names
+NVIS_pre_mvg_names = NVIS_pre_mvg_xr_high_spatial_detail.coords['group'].values.tolist()
+NVIS_pre_mvs_names = NVIS_pre_mvs_xr_high_spatial_detail.coords['group'].values.tolist()
+
+
+# --------------- Total vegataion area (ha) pre-1750 ---------------
+
+# ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
+NVIS_pre_mvg_total_ha_low_spatial_detail = np.bincount(
+    NVIS_pre_mvg_xr_low_spatial_detail.values,
+    weights = zones['CELL_HA'].values,
+    minlength = NVIS_pre_mvg_xr_low_spatial_detail.max().values + 1
+)
+
+NVIS_pre_mvs_total_ha_low_spatial_detail = np.bincount(
+    NVIS_pre_mvs_xr_low_spatial_detail.values,
+    weights = zones['CELL_HA'].values,
+    minlength = NVIS_pre_mvs_xr_low_spatial_detail.max().values + 1
+)
+
+NVIS_pre_mvg_total_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvg_names, 'TOTAL_AREA_HA': NVIS_pre_mvg_total_ha_low_spatial_detail})
+NVIS_pre_mvs_total_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvs_names, 'TOTAL_AREA_HA': NVIS_pre_mvs_total_ha_low_spatial_detail})
+
+
+
+
+# ------------- NVIS_SPATIAL_DETAIL == 'HIGH' -------------
+NVIS_pre_mvg_total_ha_high_spatial_detail = NVIS_pre_mvg_xr_high_spatial_detail * zones['CELL_HA'].values[None, :]
+NVIS_pre_mvs_total_ha_high_spatial_detail = NVIS_pre_mvs_xr_high_spatial_detail * zones['CELL_HA'].values[None, :]
+NVIS_pre_mvg_total_ha_df_high_spatial_detail = NVIS_pre_mvg_total_ha_high_spatial_detail.sum(dim='cell').to_dataframe('TOTAL_AREA_HA').reset_index()
+NVIS_pre_mvs_total_ha_df_high_spatial_detail = NVIS_pre_mvs_total_ha_high_spatial_detail.sum(dim='cell').to_dataframe('TOTAL_AREA_HA').reset_index()
 
 
 
 
 
+# --------------- Vegataion area outside the LUTO study area ---------------
+
+# ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
+NVIS_pre_mvg_outside_ha_low_spatial_detail = np.bincount(
+    NVIS_pre_mvg_xr_low_spatial_detail.sel(cell=idx_out_LUTO_natural).values, 
+    weights = zones['CELL_HA'].values[idx_out_LUTO_natural],
+    minlength = NVIS_pre_mvg_xr_low_spatial_detail.max().values + 1
+)
+
+
+NVIS_pre_mvs_outside_ha_low_spatial_detail = np.bincount(
+    NVIS_pre_mvs_xr_low_spatial_detail.sel(cell=idx_out_LUTO_natural).values,
+    weights = zones['CELL_HA'].values[idx_out_LUTO_natural],
+    minlength = NVIS_pre_mvs_xr_low_spatial_detail.max().values + 1
+)
+
+NVIS_pre_mvg_outside_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvg_names,'OUTSIDE_LUTO_AREA_HA': NVIS_pre_mvg_outside_ha_low_spatial_detail})
+NVIS_pre_mvs_outside_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvs_names,'OUTSIDE_LUTO_AREA_HA': NVIS_pre_mvs_outside_ha_low_spatial_detail})
+
+
+# ------------- NVIS_SPATIAL_DETAIL == 'HIGH' -------------
+
+NVIS_pre_mvg_outside_ha_high_spatial_detail = NVIS_pre_mvg_xr_high_spatial_detail.sel(cell=idx_out_LUTO_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_natural]     
+NVIS_pre_mvs_outside_ha_high_spatial_detail = NVIS_pre_mvs_xr_high_spatial_detail.sel(cell=idx_out_LUTO_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_natural]     
+NVIS_pre_mvg_outside_ha_df_high_spatial_detail = NVIS_pre_mvg_outside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('OUTSIDE_LUTO_AREA_HA').reset_index()
+NVIS_pre_mvs_outside_ha_df_high_spatial_detail = NVIS_pre_mvs_outside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('OUTSIDE_LUTO_AREA_HA').reset_index()
 
 
 
 
 
+# --------------- Vegataion area inside the LUTO study area ---------------
+
+# ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
+
+NVIS_pre_mvg_inside_ha_low_spatial_detail = np.bincount(
+    NVIS_pre_mvg_xr_low_spatial_detail.sel(cell=idx_in_LUTO_natural).values, 
+    weights = zones['CELL_HA'].values[idx_in_LUTO_natural],
+    minlength = NVIS_pre_mvg_xr_low_spatial_detail.max().values + 1
+)
+
+NVIS_pre_mvs_inside_ha_low_spatial_detail = np.bincount(
+    NVIS_pre_mvs_xr_low_spatial_detail.sel(cell=idx_in_LUTO_natural).values,
+    weights = zones['CELL_HA'].values[idx_in_LUTO_natural],
+    minlength = NVIS_pre_mvs_xr_low_spatial_detail.max().values + 1
+)
+
+NVIS_pre_mvg_inside_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvg_names,'INSIDE_LUTO_AREA_HA': NVIS_pre_mvg_inside_ha_low_spatial_detail})
+NVIS_pre_mvs_inside_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvs_names,'INSIDE_LUTO_AREA_HA': NVIS_pre_mvs_inside_ha_low_spatial_detail})
 
 
-# ------------------- Biodiversity Dataset 1) from Carla Archibald ---------------------------
-'''
-Historical and future habitat suitability and condition projections for terrestrial vertebrate and 
-vascular plant species (total ~106k species * 5km resolution).
-
-
-Each species-layer represents the map of rescaled (0-100) suitability for the given species.
-
-LUTO uses this dataset to add biodiversity constraints:
-(1) <Completed> By squashing all ~106k layers into a single layer with the Zonation algorithm, LUTO can 
-determined the overall importances for all species.
-
-(2) <TODO> By sperating all species into different groups (plant, mammals, ...) or endangered status, LUTO
-can prioritise the conservation for a specific group or endanger level.
-'''
-
-# The code can be found below:
-# N:/Data-Master/Biodiversity/Processing_as_LUTO_input/biodiversity_contribution_Species_Occurrence_Records
+# ------------- NVIS_SPATIAL_DETAIL == 'HIGH' -------------
+NVIS_pre_mvg_inside_ha_high_spatial_detail = NVIS_pre_mvg_xr_high_spatial_detail.sel(cell=idx_in_LUTO_natural) * zones['CELL_HA'].values[None, idx_in_LUTO_natural]
+NVIS_pre_mvs_inside_ha_high_spatial_detail = NVIS_pre_mvs_xr_high_spatial_detail.sel(cell=idx_in_LUTO_natural) * zones['CELL_HA'].values[None, idx_in_LUTO_natural]
+NVIS_pre_mvg_inside_ha_df_high_spatial_detail = NVIS_pre_mvg_inside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('INSIDE_LUTO_AREA_HA').reset_index()
+NVIS_pre_mvs_inside_ha_df_high_spatial_detail = NVIS_pre_mvs_inside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('INSIDE_LUTO_AREA_HA').reset_index()
 
 
 
 
-# ------------------- Biodiversity Dataset 2) from DCCEWW ---------------------------
-'''
-This dataset is originaly provided as a vector data. Unlike Calar's data that each cell has a float number 
-representing a species suitability, this dataset use "may occur" and "likely to occur" to indicate the presense
-of a spcies.
 
-<TODO>
-To incoporate this data to LUTO, we preprocessed it with below steps:
-(1) Rasterising the vector data to GEOTIFF format.
-(2) Use the Zonation algorithm to squash all layers into a single layer of overall biodiversity importance.
-(3) Normalizing the layers based on species group or endanger status, calculate each species contribution to the subgroup.
-'''
+# ------------- Combine 'HIGH' and 'LOW' -------------
 
-# The code can be found below:
-# N:/Data-Master/Biodiversity/Processing_as_LUTO_input/biodiversity_contribution_DCCEWW
+# Concatenate the two dataframes
+NVIS_pre_mvg_low_spatial_detail = NVIS_pre_mvg_total_ha_df_low_spatial_detail.merge(NVIS_pre_mvg_outside_ha_df_low_spatial_detail, on='group')
+NVIS_pre_mvg_high_spatial_detail = NVIS_pre_mvg_total_ha_df_high_spatial_detail.merge(NVIS_pre_mvg_outside_ha_df_high_spatial_detail, on='group')
+
+NVIS_pre_mvs_low_spatial_detail = NVIS_pre_mvs_total_ha_df_low_spatial_detail.merge(NVIS_pre_mvs_outside_ha_df_low_spatial_detail, on='group')
+NVIS_pre_mvs_high_spatial_detail = NVIS_pre_mvs_total_ha_df_high_spatial_detail.merge(NVIS_pre_mvs_outside_ha_df_high_spatial_detail, on='group')
+
+# Append a user-defined target column
+NVIS_pre_mvg_low_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
+NVIS_pre_mvg_high_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
+NVIS_pre_mvs_low_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
+NVIS_pre_mvs_high_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
+
+# Save to CSV
+NVIS_pre_mvg_low_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVG_LOW_SPATIAL_DETAIL.csv', index=False)
+NVIS_pre_mvg_high_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVG_HIGH_SPATIAL_DETAIL.csv', index=False)
+NVIS_pre_mvs_low_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVS_LOW_SPATIAL_DETAIL.csv', index=False)
+NVIS_pre_mvs_high_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVS_HIGH_SPATIAL_DETAIL.csv', index=False)
 
 
+
+
+# ------------------------- TMP -------------------------
+
+save_path = 'N:/LUF-Modelling/LUTO2_JZ/TEMP/vegetation_pre_calc_area_ha'
+
+# ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
+
+NVIS_pre_mvg_low_spatial_detail_area_ha = pd.concat([
+    NVIS_pre_mvg_total_ha_df_low_spatial_detail.set_index('group'), 
+    NVIS_pre_mvg_outside_ha_df_low_spatial_detail.set_index('group'),
+    NVIS_pre_mvg_inside_ha_df_low_spatial_detail.set_index('group')], axis=1).reset_index()
+
+NVIS_pre_mvg_low_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_AREA_HA'] = NVIS_pre_mvg_low_spatial_detail_area_ha.eval('OUTSIDE_LUTO_AREA_HA	+ INSIDE_LUTO_AREA_HA')
+NVIS_pre_mvg_low_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_to_TOTAL'] = NVIS_pre_mvg_low_spatial_detail_area_ha.eval('INSIDE_OUTSIDE_SUM_AREA_HA / TOTAL_AREA_HA')
+NVIS_pre_mvg_low_spatial_detail_area_ha.to_csv(f'{save_path}/NVIS_pre_mvg_low_spatial_detail_area_ha.csv', index=False)
+
+NVIS_pre_mvg_high_spatial_detail_area_ha = pd.concat([
+    NVIS_pre_mvg_total_ha_df_high_spatial_detail.set_index('group'), 
+    NVIS_pre_mvg_outside_ha_df_high_spatial_detail.set_index('group'),
+    NVIS_pre_mvg_inside_ha_df_high_spatial_detail.set_index('group')], axis=1).reset_index()
+
+NVIS_pre_mvg_high_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_AREA_HA'] = NVIS_pre_mvg_high_spatial_detail_area_ha.eval('OUTSIDE_LUTO_AREA_HA	+ INSIDE_LUTO_AREA_HA')
+NVIS_pre_mvg_high_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_to_TOTAL'] = NVIS_pre_mvg_high_spatial_detail_area_ha.eval('INSIDE_OUTSIDE_SUM_AREA_HA / TOTAL_AREA_HA')
+NVIS_pre_mvg_high_spatial_detail_area_ha.to_csv(f'{save_path}//NVIS_pre_mvg_high_spatial_detail_area_ha.csv', index=False)
+
+
+
+# ------------- NVIS_SPATIAL_DETAIL == 'HIGH' -------------
+
+NVIS_pre_mvs_low_spatial_detail_area_ha = pd.concat([
+    NVIS_pre_mvs_total_ha_df_low_spatial_detail.set_index('group'), 
+    NVIS_pre_mvs_outside_ha_df_low_spatial_detail.set_index('group'),
+    NVIS_pre_mvs_inside_ha_df_low_spatial_detail.set_index('group')], axis=1).reset_index()
+
+NVIS_pre_mvs_low_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_AREA_HA'] = NVIS_pre_mvs_low_spatial_detail_area_ha.eval('OUTSIDE_LUTO_AREA_HA	+ INSIDE_LUTO_AREA_HA')
+NVIS_pre_mvs_low_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_to_TOTAL'] = NVIS_pre_mvs_low_spatial_detail_area_ha.eval('INSIDE_OUTSIDE_SUM_AREA_HA / TOTAL_AREA_HA')
+NVIS_pre_mvs_low_spatial_detail_area_ha.to_csv(f'{save_path}//NVIS_pre_mvs_low_spatial_detail_area_ha.csv', index=False)
+
+
+NVIS_pre_mvs_high_spatial_detail_area_ha = pd.concat([
+    NVIS_pre_mvs_total_ha_df_high_spatial_detail.set_index('group'), 
+    NVIS_pre_mvs_outside_ha_df_high_spatial_detail.set_index('group'),
+    NVIS_pre_mvs_inside_ha_df_high_spatial_detail.set_index('group')], axis=1).reset_index()
+
+NVIS_pre_mvs_high_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_AREA_HA'] = NVIS_pre_mvs_high_spatial_detail_area_ha.eval('OUTSIDE_LUTO_AREA_HA	+ INSIDE_LUTO_AREA_HA')
+NVIS_pre_mvs_high_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_to_TOTAL'] = NVIS_pre_mvs_high_spatial_detail_area_ha.eval('INSIDE_OUTSIDE_SUM_AREA_HA / TOTAL_AREA_HA')
+NVIS_pre_mvs_high_spatial_detail_area_ha.to_csv(f'{save_path}/NVIS_pre_mvs_high_spatial_detail_area_ha.csv', index=False)
+
+# --------------------------  TMP END --------------------------

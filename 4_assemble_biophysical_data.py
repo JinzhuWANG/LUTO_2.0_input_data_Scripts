@@ -23,12 +23,11 @@ pd.set_option('display.float_format', '{:,.4f}'.format)
 
 
 # Read cell_df from disk, just grab the CELL_ID column
-cell_df = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5')[['CELL_ID', 
-                                                                                                             'CELL_HA', 
-                                                                                                             'PRIMARY_V7', 
-                                                                                                             'HR_DRAINDIV_NAME', 
-                                                                                                             'NVIS_PRE_EURO_MVG_ID', 
-                                                                                                             'NVIS_PRE_EURO_MVG_NAME']]
+cell_df = pd.read_hdf(
+    'N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5',
+    columns=['CELL_ID', 'CELL_HA', 'PRIMARY_V7', 'HR_DRAINDIV_NAME','NVIS_PRE_EURO_MVG_ID', 'NVIS_PRE_EURO_MVG_NAME']
+)
+
 
 
 ################################ Create some helper functions
@@ -126,6 +125,34 @@ cell_df['REMNANT_VEG_T_CO2_HA'] = rox_M_tDM_ha * pct_carbon * (44 / 12) / (ep_C_
 # Save the output to GeoTiff
 with rasterio.open('N:/Data-Master/Emissions_Reduction_Fund/Maximum_aboveground_biomass_M/Version_2/REMNANT_VEG_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
     dst.write_band(1, conv_1D_to_2D(cell_df['REMNANT_VEG_T_CO2_HA']))
+
+
+
+############## Mean annual rainfall (1975 - 2005) from ANUCLIM modelled using Australian 9 second DEM
+
+with rasterio.open('N:/Data-Master/ANUCLIM_climate_data/AUS_9sec_climate_data_2021/dem-9s_p12.tif') as src:
+    
+    # Create an empty destination array 
+    dst_array = np.zeros((meta.get('height'), meta.get('width')), np.float32)
+    
+    # Reproject/resample input raster to match NLUM mask (meta)
+    reproject(rasterio.band(src, 1), dst_array, dst_transform = meta.get('transform'), dst_crs = meta.get('crs'), resampling = Resampling.bilinear)
+    
+    # Create mask for filling cells
+    fill_mask = np.where(dst_array > 0, 1, 0)
+    
+    # Fill nodata using inverse distance weighted averaging and mask to NLUM
+    dst_array_filled = fillnodata(dst_array, fill_mask, max_search_distance = 100.0) * NLUM_mask
+    
+    # Save the output to GeoTiff
+    with rasterio.open('N:/Data-Master/ANUCLIM_climate_data/AUS_9sec_climate_data_2021/AVG_AN_PREC_MM_YR.tif', 'w+', dtype = 'float32', nodata = 0, **meta) as dst:        
+        dst.write_band(1, dst_array_filled)
+    
+    # Flatten 2D array to 1D array of valid values only
+    dataFlat = dst_array_filled[NLUM_mask == 1]
+        
+    # Round and add data to cell_df dataframe
+    cell_df['AVG_AN_PREC_MM_YR'] = np.round(dataFlat).astype(np.uint16)
 
 
 
@@ -266,7 +293,7 @@ with rasterio.open(gpath + 'CP_BELT_SOIL_AVG_T_CO2_HA_YR.tif', 'w+', dtype = 'fl
     dst.write_band(1, conv_1D_to_2D(cell_df['CP_BELT_SOIL_AVG_T_CO2_HA_YR']))
 
 
-with rasterio.open(gpath + 'HIR_BLOCK_TREES_AVG_T_CO2_HA_YR.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+with rasterio.open(gpath + 'HIR_BLOCK_TREES_AVG_T_CO2_HA_YR.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:
     dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_TREES_AVG_T_CO2_HA_YR']))
 with rasterio.open(gpath + 'HIR_BLOCK_DEBRIS_AVG_T_CO2_HA_YR.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
     dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_DEBRIS_AVG_T_CO2_HA_YR']))
@@ -316,33 +343,6 @@ with rasterio.open('N:/Data-Master/Establishment_costs/costs_tif/estabCostBiomas
 
 
     
-
-############## Mean annual rainfall (1975 - 2005) from ANUCLIM modelled using Australian 9 second DEM
-
-with rasterio.open('N:/Data-Master/ANUCLIM_climate_data/AUS_9sec_climate_data_2021/dem-9s_p12.tif') as src:
-    
-    # Create an empty destination array 
-    dst_array = np.zeros((meta.get('height'), meta.get('width')), np.float32)
-    
-    # Reproject/resample input raster to match NLUM mask (meta)
-    reproject(rasterio.band(src, 1), dst_array, dst_transform = meta.get('transform'), dst_crs = meta.get('crs'), resampling = Resampling.bilinear)
-    
-    # Create mask for filling cells
-    fill_mask = np.where(dst_array > 0, 1, 0)
-    
-    # Fill nodata using inverse distance weighted averaging and mask to NLUM
-    dst_array_filled = fillnodata(dst_array, fill_mask, max_search_distance = 100.0) * NLUM_mask
-    
-    # Save the output to GeoTiff
-    with rasterio.open('N:/Data-Master/ANUCLIM_climate_data/AUS_9sec_climate_data_2021/AVG_AN_PREC_MM_YR.tif', 'w+', dtype = 'float32', nodata = 0, **meta) as dst:        
-        dst.write_band(1, dst_array_filled)
-    
-    # Flatten 2D array to 1D array of valid values only
-    dataFlat = dst_array_filled[NLUM_mask == 1]
-        
-    # Round and add data to cell_df dataframe
-    cell_df['AVG_AN_PREC_MM_YR'] = np.round(dataFlat).astype(np.uint16)
-
 
 
 
