@@ -196,12 +196,30 @@ ludf_summary.to_csv('N:/Data-Master/LUTO_2.0_input_data/Scripts/Intermediate_dat
 # nlum.groupby(['PRIMARY_V7', 'TENURE_DESC'], observed = True)['COMMODITIES'].count()
 
 # Export to HDF5 file
-tmp_df = ludf[['CELL_ID', 'X', 'Y', 'CELL_HA', 'SA2_ID', 'PRIMARY_V7', 'SECONDARY_V7', 'SPREAD_ID', 'SPREAD_DESC', 'IRRIGATION', 'LU_ID', 'LU_DESC']]
-tmp_df.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', key = 'cell_LU_mapping', mode = 'w', format = 't')
+tmp_df = ludf[['CELL_ID', 'X', 'Y', 'CELL_HA', 'SA2_ID', 'PRIMARY_V7', 'SECONDARY_V7', 'SPREAD_ID', 'SPREAD_DESC', 'IRRIGATION', 'LU_ID', 'LU_DESC']].copy()
+
+# Create lumap -- 2010 land-use mapping.
+# Lexicographically ordered list of land-uses
+ag_landuses = sorted(tmp_df['LU_DESC'].unique().tolist())
+ag_landuses.remove('Non-agricultural land')
+pd.DataFrame(ag_landuses).to_csv('N:/Data-Master/National_Landuse_Map/ag_landuses.csv', index = False, header = False)
+
+# Map land-uses by lexicographical index on the map. Use -1 for anything _not_ in the land-use list.
+tmp_df['LU_ID_LUTO'] = [-1 if (r not in ag_landuses) else ag_landuses.index(r) for r in ludf['LU_DESC']]
 
 # Save the output to GeoTiff
+with rasterio.open('N:/Data-Master/National_Landuse_Map/lumap.tif', 'w+', dtype = 'int16', nodata = -99, **meta) as dst:
+    lumap_2D = conv_1D_to_2D(tmp_df['LU_ID_LUTO'])     
+    lumap_2D[np.nonzero(NLUM_mask == 0)] = -99  
+    dst.write_band(1, lumap_2D)
+
 with rasterio.open('N:/Data-Master/Profit_map/LU_ID.tif', 'w+', dtype = 'int16', nodata = -99, **meta) as dst:        
     dst.write_band(1, conv_1D_to_2D(tmp_df['LU_ID']))
+
+# Save the output to HDF5
+tmp_df.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', key = 'cell_LU_mapping', mode = 'w', format = 't')
+
+
 
 # Create a template from NLUM and livestock mapping as the ultimate sources of truth -- provides a basis for crosschecking other datasets that we have all agricultural records needed
 def_df = ludf.query('LU_ID >= 5').groupby(['SA2_ID', 'LU_ID', 'IRRIGATION'], as_index = False, observed = True)['LU_DESC'].first().sort_values(by = ['SA2_ID', 'LU_ID', 'IRRIGATION'])

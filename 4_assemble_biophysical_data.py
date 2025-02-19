@@ -29,7 +29,6 @@ cell_df = pd.read_hdf(
 )
 
 
-
 ################################ Create some helper functions
 
 # Open NLUM mask raster and get metadata
@@ -87,47 +86,6 @@ def downcast(dframe):
 
 
 
-
-########### Avoided clearance of native vegetation (based on Roxburgh's M [maximum aboveground biomass])
-
-with rasterio.open('N:/Data-Master/Emissions_Reduction_Fund/Maximum_aboveground_biomass_M/Version_2/New_M_2019.tif') as src:
-    
-    # Create a destination array with nodata = -9999
-    dst_array = np.zeros((meta.get('height'), meta.get('width')), np.float32) - 9999
-    
-    # Reproject/resample input raster to match NLUM mask (meta)
-    reproject(rasterio.band(src, 1), dst_array, dst_transform = meta.get('transform'), dst_crs = meta.get('crs'), resampling = Resampling.bilinear)
-    
-# Mask out nodata cells
-dst_array = ma.masked_where(dst_array <= -9999, dst_array)
-
-# Fill nodata in raster using value of nearest cell to match NLUM mask
-ind = nd.distance_transform_edt(dst_array.mask, return_distances = False, return_indices = True)
-dst_array_filled = dst_array[tuple(ind)]
-dst_array_masked = np.where(NLUM_mask == 0, -9999, dst_array_filled)
-
-# Save the output to GeoTiff
-with rasterio.open('N:/Data-Master/Emissions_Reduction_Fund/Maximum_aboveground_biomass_M/Version_2/ROXBURGHS_M_T_DM_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, dst_array_masked)
-
-# Flatten 2D array to 1D array of valid values only
-rox_M_tDM_ha = dst_array_masked[NLUM_mask == 1]
-
-# Load aboveground and belowground biomass from FullCAM estimates. Grab year 91 AGB and BGB. Shape = (6956407, 3)
-ep_C_AGB_BGB = np.load('N:/Data-Master/FullCAM/Output_layers/ep_block_AGB_BGB.npy')[..., 94]
-
-# Calculate the proportion of biomass that is carbon. Should be around 0.492
-pct_carbon = ep_C_AGB_BGB[:, 0] / (ep_C_AGB_BGB[:, 1] + ep_C_AGB_BGB[:, 2])
-
-# Calculate total CO2 in maximum AGB and BGB and add data to cell_df dataframe
-cell_df['REMNANT_VEG_T_CO2_HA'] = rox_M_tDM_ha * pct_carbon * (44 / 12) / (ep_C_AGB_BGB[:, 1] / (ep_C_AGB_BGB[:, 1] + ep_C_AGB_BGB[:, 2]))
-
-# Save the output to GeoTiff
-with rasterio.open('N:/Data-Master/Emissions_Reduction_Fund/Maximum_aboveground_biomass_M/Version_2/REMNANT_VEG_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['REMNANT_VEG_T_CO2_HA']))
-
-
-
 ############## Mean annual rainfall (1975 - 2005) from ANUCLIM modelled using Australian 9 second DEM
 
 with rasterio.open('N:/Data-Master/ANUCLIM_climate_data/AUS_9sec_climate_data_2021/dem-9s_p12.tif') as src:
@@ -162,96 +120,39 @@ with rasterio.open('N:/Data-Master/ANUCLIM_climate_data/AUS_9sec_climate_data_20
 path = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/3D_Spatial_Timeseries/'
 gpath = 'N:/Data-Master/FullCAM/Output_AnnAvg_GeoTiffs/'
 
+# This takes the total stand forest growth by 2100 (i.e., index 90) and averages growth per year between 2010 and 2100
+# Note that soil carbon is the marginal change in soil carbon resulting from tree planting from 2010 to 2100 rather than the total accumulated SOC.
+# This ensures additional SOC sequestration only is considered.
 with h5py.File(path + 'tCO2_ha_ep_block.h5', 'r') as h5f:
-    cell_df['EP_BLOCK_TREES_AVG_T_CO2_HA_YR'] = np.mean(h5f['Trees_tCO2_ha'], axis = 0) / 91
-    cell_df['EP_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] = np.mean(h5f['Debris_tCO2_ha'], axis = 0) / 91
-    cell_df['EP_BLOCK_SOIL_AVG_T_CO2_HA_YR'] = np.mean(h5f['Soil_tCO2_ha'], axis = 0) / 91
+    cell_df['EP_BLOCK_TREES_AVG_T_CO2_HA_YR'] = h5f['Trees_tCO2_ha'][90] / 91
+    cell_df['EP_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] = h5f['Debris_tCO2_ha'][90] / 91
+    cell_df['EP_BLOCK_SOIL_AVG_T_CO2_HA_YR'] = (h5f['Soil_tCO2_ha'][90] - h5f['Soil_tCO2_ha'][0]) / 91
 
 with h5py.File(path + 'tCO2_ha_ep_rip.h5', 'r') as h5f:
-    cell_df['EP_RIP_TREES_AVG_T_CO2_HA_YR'] = np.mean(h5f['Trees_tCO2_ha'], axis = 0) / 91
-    cell_df['EP_RIP_DEBRIS_AVG_T_CO2_HA_YR'] = np.mean(h5f['Debris_tCO2_ha'], axis = 0) / 91
-    cell_df['EP_RIP_SOIL_AVG_T_CO2_HA_YR'] = np.mean(h5f['Soil_tCO2_ha'], axis = 0) / 91
+    cell_df['EP_RIP_TREES_AVG_T_CO2_HA_YR'] = h5f['Trees_tCO2_ha'][90] / 91
+    cell_df['EP_RIP_DEBRIS_AVG_T_CO2_HA_YR'] = h5f['Debris_tCO2_ha'][90] / 91
+    cell_df['EP_RIP_SOIL_AVG_T_CO2_HA_YR'] = (h5f['Soil_tCO2_ha'][90] - h5f['Soil_tCO2_ha'][0]) / 91
 
 with h5py.File(path + 'tCO2_ha_ep_belt.h5', 'r') as h5f:
-    cell_df['EP_BELT_TREES_AVG_T_CO2_HA_YR'] = np.mean(h5f['Trees_tCO2_ha'], axis = 0) / 91
-    cell_df['EP_BELT_DEBRIS_AVG_T_CO2_HA_YR'] = np.mean(h5f['Debris_tCO2_ha'], axis = 0) / 91
-    cell_df['EP_BELT_SOIL_AVG_T_CO2_HA_YR'] = np.mean(h5f['Soil_tCO2_ha'], axis = 0) / 91
-
+    cell_df['EP_BELT_TREES_AVG_T_CO2_HA_YR'] = h5f['Trees_tCO2_ha'][90] / 91
+    cell_df['EP_BELT_DEBRIS_AVG_T_CO2_HA_YR'] = h5f['Debris_tCO2_ha'][90] / 91
+    cell_df['EP_BELT_SOIL_AVG_T_CO2_HA_YR'] = (h5f['Soil_tCO2_ha'][90] - h5f['Soil_tCO2_ha'][0]) / 91
 
 with h5py.File(path + 'tCO2_ha_cp_block.h5', 'r') as h5f:
-    cell_df['CP_BLOCK_TREES_AVG_T_CO2_HA_YR'] = np.mean(h5f['Trees_tCO2_ha'], axis = 0) / 91
-    cell_df['CP_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] = np.mean(h5f['Debris_tCO2_ha'], axis = 0) / 91
-    cell_df['CP_BLOCK_SOIL_AVG_T_CO2_HA_YR'] = np.mean(h5f['Soil_tCO2_ha'], axis = 0) / 91
+    cell_df['CP_BLOCK_TREES_AVG_T_CO2_HA_YR'] = h5f['Trees_tCO2_ha'][90] / 91
+    cell_df['CP_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] = h5f['Debris_tCO2_ha'][90] / 91
+    cell_df['CP_BLOCK_SOIL_AVG_T_CO2_HA_YR'] = (h5f['Soil_tCO2_ha'][90] - h5f['Soil_tCO2_ha'][0]) / 91
 
 with h5py.File(path + 'tCO2_ha_cp_belt.h5', 'r') as h5f:
-    cell_df['CP_BELT_TREES_AVG_T_CO2_HA_YR'] = np.mean(h5f['Trees_tCO2_ha'], axis = 0) / 91
-    cell_df['CP_BELT_DEBRIS_AVG_T_CO2_HA_YR'] = np.mean(h5f['Debris_tCO2_ha'], axis = 0) / 91
-    cell_df['CP_BELT_SOIL_AVG_T_CO2_HA_YR'] = np.mean(h5f['Soil_tCO2_ha'], axis = 0) / 91
+    cell_df['CP_BELT_TREES_AVG_T_CO2_HA_YR'] = h5f['Trees_tCO2_ha'][90] / 91
+    cell_df['CP_BELT_DEBRIS_AVG_T_CO2_HA_YR'] = h5f['Debris_tCO2_ha'][90] / 91
+    cell_df['CP_BELT_SOIL_AVG_T_CO2_HA_YR'] = (h5f['Soil_tCO2_ha'][90] - h5f['Soil_tCO2_ha'][0]) / 91
 
     
 with h5py.File(path + 'tCO2_ha_hir_block.h5', 'r') as h5f:
-    cell_df['HIR_BLOCK_TREES_AVG_T_CO2_HA_YR'] = np.mean(h5f['Trees_tCO2_ha'], axis = 0) / 91
-    cell_df['HIR_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] = np.mean(h5f['Debris_tCO2_ha'], axis = 0) / 91
-    cell_df['HIR_BLOCK_SOIL_AVG_T_CO2_HA_YR'] = np.mean(h5f['Soil_tCO2_ha'], axis = 0) / 91
-
-with h5py.File(path + 'tCO2_ha_hir_rip.h5', 'r') as h5f:
-    cell_df['HIR_RIP_TREES_AVG_T_CO2_HA_YR'] = np.mean(h5f['Trees_tCO2_ha'], axis = 0) / 91
-    cell_df['HIR_RIP_DEBRIS_AVG_T_CO2_HA_YR'] = np.mean(h5f['Debris_tCO2_ha'], axis = 0) / 91
-    cell_df['HIR_RIP_SOIL_AVG_T_CO2_HA_YR'] = np.mean(h5f['Soil_tCO2_ha'], axis = 0) / 91
-
-
-# Save the output to GeoTiff - TOTAL CO2 sequestration over 91 years
-
-with rasterio.open(gpath + 'EP_BLOCK_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BLOCK_TREES_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'EP_BLOCK_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'EP_BLOCK_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BLOCK_SOIL_AVG_T_CO2_HA_YR'] * 91))
-
-with rasterio.open(gpath + 'EP_RIP_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_RIP_TREES_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'EP_RIP_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_RIP_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'EP_RIP_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_RIP_SOIL_AVG_T_CO2_HA_YR'] * 91))
-
-with rasterio.open(gpath + 'EP_BELT_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BELT_TREES_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'EP_BELT_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BELT_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'EP_BELT_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BELT_SOIL_AVG_T_CO2_HA_YR'] * 91))
-
-
-with rasterio.open(gpath + 'CP_BLOCK_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BLOCK_TREES_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'CP_BLOCK_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'CP_BLOCK_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BLOCK_SOIL_AVG_T_CO2_HA_YR'] * 91))
-    
-with rasterio.open(gpath + 'CP_BELT_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BELT_TREES_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'CP_BELT_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BELT_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'CP_BELT_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BELT_SOIL_AVG_T_CO2_HA_YR'] * 91))
-
-
-with rasterio.open(gpath + 'HIR_BLOCK_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_TREES_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'HIR_BLOCK_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'HIR_BLOCK_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_SOIL_AVG_T_CO2_HA_YR'] * 91))
-    
-with rasterio.open(gpath + 'HIR_RIP_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_RIP_TREES_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'HIR_RIP_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_RIP_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
-with rasterio.open(gpath + 'HIR_RIP_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_RIP_SOIL_AVG_T_CO2_HA_YR'] * 91))
+    cell_df['HIR_BLOCK_TREES_AVG_T_CO2_HA_YR'] = h5f['Trees_tCO2_ha'][90] / 91
+    cell_df['HIR_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] = h5f['Debris_tCO2_ha'][90] / 91
+    cell_df['HIR_BLOCK_SOIL_AVG_T_CO2_HA_YR'] = (h5f['Soil_tCO2_ha'][90] - h5f['Soil_tCO2_ha'][0]) / 91
 
 
 # Save the output to GeoTiff - ANNUAL AVERAGE CO2 sequestration over 91 years
@@ -299,17 +200,136 @@ with rasterio.open(gpath + 'HIR_BLOCK_DEBRIS_AVG_T_CO2_HA_YR.tif', 'w+', dtype =
     dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_DEBRIS_AVG_T_CO2_HA_YR']))
 with rasterio.open(gpath + 'HIR_BLOCK_SOIL_AVG_T_CO2_HA_YR.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
     dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_SOIL_AVG_T_CO2_HA_YR']))
-    
-with rasterio.open(gpath + 'HIR_RIP_TREES_AVG_T_CO2_HA_YR.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_RIP_TREES_AVG_T_CO2_HA_YR']))
-with rasterio.open(gpath + 'HIR_RIP_DEBRIS_AVG_T_CO2_HA_YR.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_RIP_DEBRIS_AVG_T_CO2_HA_YR']))
-with rasterio.open(gpath + 'HIR_RIP_SOIL_AVG_T_CO2_HA_YR.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_RIP_SOIL_AVG_T_CO2_HA_YR']))
-    
 
 
+# Save the output to GeoTiff - TOTAL CO2 sequestration over 91 years
+
+with rasterio.open(gpath + 'EP_BLOCK_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BLOCK_TREES_AVG_T_CO2_HA_YR'] * 91))
+with rasterio.open(gpath + 'EP_BLOCK_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
+with rasterio.open(gpath + 'EP_BLOCK_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BLOCK_SOIL_AVG_T_CO2_HA_YR'] * 91))
+
+with rasterio.open(gpath + 'EP_RIP_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['EP_RIP_TREES_AVG_T_CO2_HA_YR'] * 91))
+with rasterio.open(gpath + 'EP_RIP_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['EP_RIP_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
+with rasterio.open(gpath + 'EP_RIP_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['EP_RIP_SOIL_AVG_T_CO2_HA_YR'] * 91))
+
+with rasterio.open(gpath + 'EP_BELT_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BELT_TREES_AVG_T_CO2_HA_YR'] * 91))
+with rasterio.open(gpath + 'EP_BELT_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BELT_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
+with rasterio.open(gpath + 'EP_BELT_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BELT_SOIL_AVG_T_CO2_HA_YR'] * 91))
+
+
+with rasterio.open(gpath + 'CP_BLOCK_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BLOCK_TREES_AVG_T_CO2_HA_YR'] * 91))
+with rasterio.open(gpath + 'CP_BLOCK_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
+with rasterio.open(gpath + 'CP_BLOCK_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BLOCK_SOIL_AVG_T_CO2_HA_YR'] * 91))
     
+with rasterio.open(gpath + 'CP_BELT_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BELT_TREES_AVG_T_CO2_HA_YR'] * 91))
+with rasterio.open(gpath + 'CP_BELT_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BELT_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
+with rasterio.open(gpath + 'CP_BELT_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BELT_SOIL_AVG_T_CO2_HA_YR'] * 91))
+
+
+with rasterio.open(gpath + 'HIR_BLOCK_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_TREES_AVG_T_CO2_HA_YR'] * 91))
+with rasterio.open(gpath + 'HIR_BLOCK_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] * 91))
+with rasterio.open(gpath + 'HIR_BLOCK_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_SOIL_AVG_T_CO2_HA_YR'] * 91))
+
+
+
+
+########### Avoided clearance of native vegetation (based on Roxburgh's M [maximum aboveground biomass])
+
+with rasterio.open('N:/Data-Master/Emissions_Reduction_Fund/Maximum_aboveground_biomass_M/Version_2/New_M_2019.tif') as src:
+    
+    # Create a destination array with nodata = -9999
+    dst_array = np.zeros((meta.get('height'), meta.get('width')), np.float32) - 9999
+    
+    # Reproject/resample input raster to match NLUM mask (meta)
+    reproject(rasterio.band(src, 1), dst_array, dst_transform = meta.get('transform'), dst_crs = meta.get('crs'), resampling = Resampling.bilinear)
+    
+# Mask out nodata cells
+dst_array = ma.masked_where(dst_array <= -9999, dst_array)
+
+# Fill nodata in raster using value of nearest cell to match NLUM mask
+ind = nd.distance_transform_edt(dst_array.mask, return_distances = False, return_indices = True)
+dst_array_filled = dst_array[tuple(ind)]
+dst_array_masked = np.where(NLUM_mask == 0, -9999, dst_array_filled)
+
+# Save the output to GeoTiff
+with rasterio.open('N:/Data-Master/Emissions_Reduction_Fund/Maximum_aboveground_biomass_M/Version_2/ROXBURGHS_M_T_DM_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, dst_array_masked)
+
+# Flatten 2D array to 1D array of valid values only
+rox_M_tDM_ha = dst_array_masked[NLUM_mask == 1]
+
+
+
+####### Calculate CO2 in aboveground living biomass in natural land i.e., the part impacted by livestock **** 
+
+# Load aboveground and belowground biomass from FullCAM estimates. Grab year 91 AGB and BGB. Shape = (6956407, 3)
+ep_C_AGB_BGB = np.load('N:/Data-Master/FullCAM/Output_layers/ep_block_AGB_BGB.npy')[..., 94]
+
+# Calculate the proportion of biomass that is carbon. Should be around 0.492
+pct_carbon = ep_C_AGB_BGB[:, 0] / (ep_C_AGB_BGB[:, 1] + ep_C_AGB_BGB[:, 2])
+
+# Convert biomass in tDM/ha to tCO2/ha and add data to cell_df dataframe 
+cell_df['NATURAL_LAND_AGB_TCO2_HA'] = rox_M_tDM_ha * pct_carbon * (44 / 12)
+
+# Save the output to GeoTiff
+with rasterio.open('N:/Data-Master/Emissions_Reduction_Fund/Maximum_aboveground_biomass_M/Version_2/NATURAL_LAND_AGB_TCO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['NATURAL_LAND_AGB_TCO2_HA']))
+
+
+
+####### Calculate CO2 in aboveground living biomass and debris in natural land i.e., the part impacted by fire **** 
+
+# Calculate aboveground biomass (tDM/ha) for EP 2100 and convert to tCO2/ha
+ep_AGB_TCO2 = (ep_C_AGB_BGB[:, 1] * pct_carbon * (44 / 12))
+
+# Adjustment factor for converting aboveground tree biomass CO2 to total CO2 (i.e. including debris)  
+ratio_ABG_to_AGB_DEBRIS = ep_AGB_TCO2 / (ep_AGB_TCO2 + cell_df['EP_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] * 91)  
+                      
+# Calculate total CO2 in maximum AGB and debris and add data to cell_df dataframe
+cell_df['NATURAL_LAND_AGB_DEBRIS_TCO2_HA'] = cell_df['NATURAL_LAND_AGB_TCO2_HA'] / ratio_ABG_to_AGB_DEBRIS
+
+# Save the output to GeoTiff
+with rasterio.open('N:/Data-Master/Emissions_Reduction_Fund/Maximum_aboveground_biomass_M/Version_2/NATURAL_LAND_AGB_DEBRIS_TCO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['NATURAL_LAND_AGB_DEBRIS_TCO2_HA']))
+
+
+
+####### Calculate CO2 in aboveground living biomass and debris and soil in natural land i.e., the part impacted by land clearance **** 
+
+# Adjustment factor for converting aboveground tree biomass CO2 to total CO2 (i.e. including trees, roots, debris, SOC ) 
+ratio_ABG_to_TREES_DEBRIS_SOIL = (ep_AGB_TCO2 /                                         # Aboveground biomass for 2100 in tCO2/ha
+                                 (cell_df['EP_BLOCK_TREES_AVG_T_CO2_HA_YR'] * 91 +      # Sum of trees, roots, debris and soil in tCO2/ha terms for 2100 
+                                  cell_df['EP_BLOCK_DEBRIS_AVG_T_CO2_HA_YR'] * 91 + 
+                                  cell_df['EP_BLOCK_SOIL_AVG_T_CO2_HA_YR'] * 91)
+                                 )
+
+# Calculate total CO2 in maximum AGB and BGB and add data to cell_df dataframe
+cell_df['NATURAL_LAND_TREES_DEBRIS_SOIL_TCO2_HA'] = cell_df['NATURAL_LAND_AGB_TCO2_HA'] / ratio_ABG_to_TREES_DEBRIS_SOIL 
+
+# Save the output to GeoTiff
+with rasterio.open('N:/Data-Master/Emissions_Reduction_Fund/Maximum_aboveground_biomass_M/Version_2/NATURAL_LAND_TREES_DEBRIS_SOIL_TCO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+    dst.write_band(1, conv_1D_to_2D(cell_df['NATURAL_LAND_TREES_DEBRIS_SOIL_TCO2_HA']))
+
+
+
 ############## Length of watercourse occurring on each cell for riparian restoration
 
 with rasterio.open('N:/Data-Master/Riparian_areas/Data/Riparian_areas/riverAtlas_riparianLength_30mBuff_18112021.tif') as src:
@@ -786,8 +806,6 @@ with rasterio.open('N:/Data-Master/Soils/Soil_erosion/Dataset_9s/SDR_key_outputs
 # Function to 
 # 1) reproject/resample input raster to match NLUM mask (meta), 
 # 2) fill nodata using inverse distance weighted averaging and mask to NLUM, 
-# 3) save the output to GeoTiff, 
-# 4) flatten 2D array to 1D array of valid values only
 def reproj_resample(from_raster_path:str, to_raster_meta=meta, resampling: Resampling=Resampling.nearest, fill_nodata:bool=True) -> np.ndarray:
     
     with rasterio.open(from_raster_path) as src:
@@ -852,7 +870,7 @@ with rasterio.Env(CPL_DEBUG=False):
 
         # Read the LUMAP data for year 2010, then reproject and resample it to match HCAS
         lu_arr_match_HCAS = reproj_resample(
-            f'{HCAS_path}/Processed/lumap_2010.tiff',
+            'N:/Data-Master/National_Landuse_Map/lumap.tif',
             HCAS_meta,
             resampling = Resampling.nearest,     # use 'nearest' resampling to upsample the LUMAP data (1km) to match HCAS (90m)
             fill_nodata = False                  # do not fill nodata when reprojecting LUMAP

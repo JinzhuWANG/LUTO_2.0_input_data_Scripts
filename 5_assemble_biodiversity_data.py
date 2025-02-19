@@ -2,20 +2,12 @@
 
 # Author:		Jinzhu WANG
 # Email: 		wangjinzhulala@gmail.com
-# Last update: 	6 Feb, 2025
+# Last update: 	17 Feb, 2025
 
-
-'''
-The benefits of using xarray is its multi-dimension labeling for NDArray, inherent parallelizing,
-and raster processing (with rioxarray) capabilities.
-
-The key technical consideration here is how to deal with the ~10k layers in a reasonable time.
-We choose to use a 5km spatial resolution to reduce data size, and leverage the parallelising 
-of xarray to speed up the processing.
-'''
 
 
 import os, re
+import netCDF4
 import rasterio, fiona
 import xarray as xr
 import rioxarray as rxr
@@ -34,15 +26,58 @@ from affine import Affine
 
 
 
+# Global variables
+NLUM = rxr.open_rasterio('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif').squeeze('band').drop_vars('band').astype('uint8') 
+NLUM_zero = NLUM.copy() * 0
+
+bio_Carla_GTIFF_dir  = 'N:/Data-Master/Biodiversity/Environmental-suitability/Annual-species-suitability_20-year_snapshots_5km'
+bio_Carla_NetCDF_dir = 'N:/Data-Master/Biodiversity/Environmental-suitability/Annual-species-suitability_20-year_snapshots_5km_to_NetCDF'
+
+SNES_TIF_path = 'N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF'
+bio_DCCEEW_dir = 'N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF/To_NetCDF'
+
+NVIS_PRE_1750_path = 'N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL'
+
+HCAS_condition = 'N:/Data-Master/Habitat_condition_assessment_system/Data/Processed/HABITAT_CONDITION.csv'
+Unalloc_nat_code = 23
+
+# Read previouse raw data
+zones = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5', key='cell_zones_df', columns=['X', 'Y', 'CELL_HA'])
+bioph = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5', key = 'cell_biophysical_df', columns=['NATURAL_AREA_INC_WATER'])
+lumap = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', key = 'cell_LU_mapping', columns=['LU_DESC','LU_ID_LUTO'])
+
+# Get land-use degradation data
+biodiv_degrade_lookup = pd.read_csv(HCAS_condition).set_index(['lu'])['PERCENTILE_50'].to_dict()
+biodiv_degrade_lookup = {k:v*(1/biodiv_degrade_lookup[Unalloc_nat_code]) for k,v in biodiv_degrade_lookup.items()}
+biodiv_degrade_lookup[-1] = 1  # -1 means outside the study area, so we set their degrade score to 1 (no degrade).
+biodiv_degrade_ly = np.vectorize(biodiv_degrade_lookup.get)(lumap['LU_ID_LUTO']).astype(np.float32)
+biodiv_degrade_ly_2D = NLUM_zero.copy().astype(np.float32)
+np.place(biodiv_degrade_ly_2D.values, NLUM.values, biodiv_degrade_ly)
+
+# Get real area for each cell
+real_area_ha = zones['CELL_HA'].values
+real_area_ha_2D = NLUM_zero.copy().astype(np.float32)
+np.place(real_area_ha_2D.values, NLUM.values, real_area_ha)
+
+# Get the index of cells that are in natural state, and inside/outside the LUTO study area
+natural_cells = np.logical_not(bioph['NATURAL_AREA_INC_WATER'].values)  # 0 is natural, 1 is non-natural; so we flip the values to make 1 natural
+idx_in_LUTO_natural = np.isin(lumap['LU_DESC'], ['Beef - natural land', 'Dairy - natural land', 'Sheep - natural land', 'Unallocated - natural land'])
+idx_out_LUTO = np.isin(lumap['LU_DESC'], ['Non-agricultural land'])     # shape=6956407, sum=2737674
+idx_out_LUTO_natural = idx_out_LUTO & natural_cells
+
+idx_in_LUTO_natural_2D = NLUM_zero.copy()
+np.place(idx_in_LUTO_natural_2D.values, NLUM.values, idx_in_LUTO_natural.astype('uint8'))
+idx_out_LUTO_natural_2D = NLUM_zero.copy()
+np.place(idx_out_LUTO_natural_2D.values, NLUM.values, idx_out_LUTO_natural.astype('uint8'))
+
+
+
 
 ################################################################################
 #                  Process Biodiversity Data (Carla) with Xarray               #
 ################################################################################
 
 
-# -----------------------------------------------------------------------------------------------------
-#                   Biodiversity suitability dataset from Carla Archibald 
-# -----------------------------------------------------------------------------------------------------
 
 '''
 Historical and future habitat suitability and condition projections for terrestrial vertebrate and 
@@ -74,26 +109,10 @@ can be thought as a data cube of 4 dimensions: (year * species (group) * x * y),
 
 
 
-# Global variables
-NLUM = rxr.open_rasterio('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif').squeeze('band').drop_vars('band').astype('uint8') 
-
-bio_GTIFF_dir  = 'N:/Data-Master/Biodiversity/Environmental-suitability/Annual-species-suitability_20-year_snapshots_5km'
-bio_NetCDF_dir = 'N:/Data-Master/Biodiversity/Environmental-suitability/Annual-species-suitability_20-year_snapshots_5km_to_NetCDF'
-
-
 def find_str(row: pd.Series) -> list:
     """
     Extracts relevant information from the given row's path and returns it as a list.
-
-    Args:
-        row (pandas.Series): A pandas Series object representing a row of data.
-    Returns:
-        list: A list containing the extracted information from the row's path.
-    Raises:
-        IndexError: If the regular expression fails to find a match for the year.
     """
-    
-    
     reg_year = re.compile(r'_(\d{4})_').findall(row['path'])[0]
     
     if int(reg_year) < 2010:
@@ -108,13 +127,6 @@ def find_str(row: pd.Series) -> list:
 def get_all_path(root_dir:str, save_path:str):
     """
     Retrieves the paths of all TIFF files in the specified root directory and saves them to a CSV file.
-
-    Parameters:
-    - root_dir (str): The root directory to search for TIFF files.
-    - save_path (str): The path to save the CSV file.
-
-    Returns:
-    None
     """
     records = []
     for dirpath, _, filenames in tqdm(os.walk(root_dir)):
@@ -130,12 +142,12 @@ def get_all_path(root_dir:str, save_path:str):
 
 
 # Get all the paths of the GeoTIFF files
-if not os.path.exists(f'{bio_NetCDF_dir}/bio_file_paths_raw.csv'):
+if not os.path.exists(f'{bio_Carla_NetCDF_dir}/bio_file_paths_raw.csv'):
     # Create a csv file recording all the paths, group, species, model, ssp, year, mode
-    get_all_path(bio_GTIFF_dir, f'{bio_NetCDF_dir}/bio_file_paths_condition.csv')
+    get_all_path(bio_Carla_GTIFF_dir, f'{bio_Carla_NetCDF_dir}/bio_file_paths_condition.csv')
 else:
     # Read the existing csv file
-    df = pd.read_csv(f'{bio_NetCDF_dir}/bio_file_paths_raw.csv' )
+    df = pd.read_csv(f'{bio_Carla_NetCDF_dir}/bio_file_paths_raw.csv' )
 
 
 
@@ -154,20 +166,7 @@ bio_arr_area_ha = bio_arr.copy()
 bio_arr_area_ha.values = rnd_gdf['CELL_HA'].values.reshape(bio_arr.sizes['y'], bio_arr.sizes['x'])
 
 
-# Read previouse raw data
-zones = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5', key='cell_zones_df', columns=['X', 'Y', 'CELL_HA'])
-bioph = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5', key = 'cell_biophysical_df', columns=['NATURAL_AREA_INC_WATER'])
-lumap = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', key = 'cell_LU_mapping', columns=['LU_DESC'])
-
-
-# Get the index of cells that are in natural state, and inside/outside the LUTO study area
-natural_cells = np.logical_not(bioph['NATURAL_AREA_INC_WATER'].values)  # 0 is natural, 1 is non-natural; so we flip the values to make 1 natural
-idx_in_LUTO_natural = np.isin(lumap['LU_DESC'], ['Beef - natural land', 'Dairy - natural land', 'Sheep - natural land', 'Unallocated - natural land'])
-idx_out_LUTO = np.isin(lumap['LU_DESC'], ['Non-agricultural land'])     # shape=6956407, sum=2737674
-idx_out_LUTO_natural = idx_out_LUTO & natural_cells
-
 # Convert the index to xarray; 1D with cell as the primary dimension, and y, x as the coordinates
-NLUM_zero = NLUM.copy() * 0
 idx_in_LUTO_natural_2D = NLUM_zero.copy()
 np.place(idx_in_LUTO_natural_2D.values, NLUM.values, idx_in_LUTO_natural.astype('uint8'))
 idx_out_LUTO_natural_2D = NLUM_zero.copy()
@@ -230,7 +229,7 @@ for ssp, mode in product(ensemble_df['ssp'].unique(), ensemble_df['mode'].unique
     # Save to nc, chunked by year, species, leave x, y as unlimited
     ensemble_arr.name = 'data'
     ensemble_arr.to_netcdf(
-        f'{bio_NetCDF_dir}/bio_{ssp}_{mode}.nc', 
+        f'{bio_Carla_NetCDF_dir}/bio_{ssp}_{mode}.nc', 
         mode='w', 
         encoding={'data': {
             "compression": "gzip", 
@@ -247,7 +246,7 @@ for ssp, mode in product(ensemble_df['ssp'].unique(), ensemble_df['mode'].unique
 # -------------------- Calculate biodiversity contribution by group ------------------------------------------
 
 # Search for biodiversity NetCDF files
-bio_suitability_ncs = glob(f'{bio_NetCDF_dir}/*_EnviroSuit.nc')
+bio_suitability_ncs = glob(f'{bio_Carla_NetCDF_dir}/*_EnviroSuit.nc')
   
 # Save nc to disk
 for nc in bio_suitability_ncs:
@@ -290,7 +289,7 @@ for nc in bio_suitability_ncs:
     # Save to nc, chunked by year, group, leave x, y as unlimited
     group_arr_contribution.name = 'data'
     group_arr_contribution.to_netcdf(
-        f'{bio_NetCDF_dir}/{fname}_group.nc', 
+        f'{bio_Carla_NetCDF_dir}/{fname}_group.nc', 
         mode='w', 
         encoding={'data': {
             'compression': 'gzip', 
@@ -305,14 +304,14 @@ for nc in bio_suitability_ncs:
 
 
 
-# ------------------- Calculate the biodiversity score for each species ------------------------------------------
+# ------------------- Calculate the biodiversity score for each species  ------------------------------------------
 
 # Calculate the contribution, with real_area weighted
-bio_condition_ncs = glob(f'{bio_NetCDF_dir}/*_EnviroSuit.nc')
+bio_condition_ncs = glob(f'{bio_Carla_NetCDF_dir}/*_EnviroSuit.nc')
 
 for nc in bio_condition_ncs:
     
-    fname = os.path.basename(nc).replace('_EnviroSuit.nc', '_Condition')
+    fname = os.path.basename(nc).replace('_EnviroSuit.nc', '_EnviroSuit_Score')
     # Biodiversity scores for ALL Australia, inside LUTO study area, and outside LUTO study area
     score_sources = ['all', 'in', 'out']
     # Read the data
@@ -326,50 +325,70 @@ for nc in bio_condition_ncs:
     )
 
     def get_val(sel_year, sel_species):
-        arr = bio_suitability.sel(year=sel_year, species=sel_species).compute()
-        all_sum = arr.sum(['y', 'x'])
-        in_sum = arr.where(idx_in_LUTO_natural_2D_bio).sum(['y', 'x'])
-        out_sum = arr.where(idx_out_LUTO_natural_2D_bio).sum(['y', 'x'])
-        return sel_year, sel_species, all_sum, in_sum.values, out_sum.values
+
+        arr = bio_suitability.sel(species=sel_species).interp(year=sel_year, method='linear').compute()
+        # Reproject the data to match NLUM
+        arr = arr.rio.set_crs(NLUM.rio.crs)
+        arr = arr.rio.reproject_match(NLUM, resample=rasterio.enums.Resampling.bilinear) 
+        # Multiply by the real area (ha) to get the area weighted contribution
+        arr = (arr * real_area_ha_2D).astype('float32')
+        
+        if sel_year == 1990:
+            all_sum = arr.sum(['y', 'x']).values
+            in_sum = arr.where(idx_in_LUTO_natural_2D).sum(['y', 'x']).values
+            out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
+        elif sel_year == 2010:
+            arr = arr * biodiv_degrade_ly_2D
+            all_sum = arr.sum(['y', 'x']).values
+            in_sum = arr.where(idx_in_LUTO_natural_2D).sum(['y', 'x']).values
+            out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
+        else:
+            all_sum = np.nan
+            in_sum = np.nan
+            out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
+        return sel_year, sel_species, all_sum, in_sum, out_sum
         
     tasks = [
         delayed(get_val)(yr, sp) 
-        for sp in bio_suitability['species']
-        for yr in bio_suitability['year']
+        for sp in bio_suitability['species'].values
+        for yr in bio_suitability['year'].values
     ]
     for yr, sp, val_sum, val_in, val_out in tqdm(Parallel(n_jobs=-1, return_as='generator')(tasks), total=len(tasks)):
         bio_suitability_sum.loc[yr, sp] = [val_sum, val_in, val_out]
 
     # Save to csv
-    bio_suitability_sum.to_dataframe('BIO_SCORE_HA').reset_index().to_csv(f'{bio_NetCDF_dir}/{fname}.csv', index=False)
+    bio_suitability_sum.to_dataframe('BIO_SUITABILITY_AREA_WEIGHTED_SCORE_HA').reset_index().to_csv(f'{bio_Carla_NetCDF_dir}/{fname}.csv', index=False)
 
 
 
 
 # Get the biodiversity score for the baseline year (1990), as well as the in/out LUTO scores
-bio_in_and_out = pd.DataFrame()
+bio_scores = pd.DataFrame()
 
-for bio_scores in glob(f'{bio_NetCDF_dir}/*_Condition.csv'):
+for f in glob(f'{bio_Carla_NetCDF_dir}/*_Score.csv'):
     
-    ssp = re.compile(r'bio_ssp(\d*)_').findall(bio_scores)[0]
-    bio_baseline = pd.read_csv(bio_scores).query('year == 1990').query('source == "all"')
-    bio_out = pd.read_csv(bio_scores).query('year != 1990').query('source == "out"')
-    
+    ssp = re.compile(r'bio_ssp(\d*)_').findall(f)[0]
+    bio_baseline = pd.read_csv(f).query('year == 1990').query('source == "all"')
+    bio_in = pd.read_csv(f).query('year != 1990').query('source == "in"')
+    bio_out = pd.read_csv(f).query('year != 1990').query('source == "out"')
     
     # Combine baseline and in/out LUTO scores
-    bio_df = pd.concat([bio_baseline, bio_out], ignore_index=True).sort_values(['species', 'source', 'year'])
+    bio_df = pd.concat([bio_baseline, bio_in, bio_out], ignore_index=True)
     bio_df['SSP'] = ssp
-    bio_in_and_out = pd.concat([bio_in_and_out, bio_df])
-    
+    bio_scores = pd.concat([bio_scores, bio_df], ignore_index=True)
+     
+
 # Save to disk
-bio_in_and_out.to_csv(f'{bio_NetCDF_dir}/BIODIVERSITY_GBF4A_SCORES.csv', index=False)
+bio_scores.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_SCORES.csv', index=False)
 
-bio_target = pd.DataFrame({
-    'species':bio_in_and_out['species'].unique(), 
-    'USER_DEFINED_TARGET_PERCENT':np.nan}
-)
 
-bio_target.to_csv(f'{bio_NetCDF_dir}/BIODIVERSITY_GBF4A_TARGET.csv', index=False)
+# Calculate the percentage of bio score for 2010 to 1990
+bio_target = bio_scores.pivot(index=['species', 'SSP'], columns='source', values='BIO_SCORE_HA').reset_index()
+bio_target['RATIO_2010_to_BASELINE'] = bio_target.eval('(`in` + `out`) / `all`')
+bio_target = bio_target[['RATIO_2010_to_BASELINE','species', 'SSP']]
+bio_target.columns.name = None
+bio_target.insert(0, 'USER_DEFINED_TARGET_PERCENT', np.nan)
+bio_target.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_TARGET.csv', index=False)
 
 
 
@@ -385,8 +404,6 @@ bio_target.to_csv(f'{bio_NetCDF_dir}/BIODIVERSITY_GBF4A_TARGET.csv', index=False
 
 # Set parameters
 n_workers = 50
-SNES_TIF_PATH = 'N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF'
-
 
 # Read the reference raster data
 ref_mask = NLUM.values
@@ -414,10 +431,10 @@ presence_dict = {1: 'MAYBE', 2: 'LIKELY'}
 snes_dissolve = snes.dissolve(by=['SCIENTIFIC_NAME','PRESENCE_CATEGORY']).reset_index()
 ecnes_dissolve = ecnes.dissolve(by=['COMMUNITY', 'CATEGORY']).reset_index()
 
-if not os.path.exists(f"{SNES_TIF_PATH}/snes_dissolve.geojson"):
-    snes_dissolve.to_file(f"{SNES_TIF_PATH}/DISSOLVED_VECTOR/snes_dissolve.geojson")
-if not os.path.exists(f"{SNES_TIF_PATH}/ecnes_dissolve.geojson"):
-    ecnes_dissolve.to_file(f"{SNES_TIF_PATH}/DISSOLVED_VECTOR/ecnes_dissolve.geojson")
+if not os.path.exists(f"{SNES_TIF_path}/snes_dissolve.geojson"):
+    snes_dissolve.to_file(f"{SNES_TIF_path}/DISSOLVED_VECTOR/snes_dissolve.geojson")
+if not os.path.exists(f"{SNES_TIF_path}/ecnes_dissolve.geojson"):
+    ecnes_dissolve.to_file(f"{SNES_TIF_path}/DISSOLVED_VECTOR/ecnes_dissolve.geojson")
 
 
 def get_presVal_savePath(row):
@@ -425,11 +442,11 @@ def get_presVal_savePath(row):
     if 'PRES_RANK' in row:  # ECNES data
         val = row['PRES_RANK']
         name = row['COMMUNITY'].replace('/', '_')
-        save_path = f'{SNES_TIF_PATH}/ECNES/{name}_{presence_dict[val]}.tif'
+        save_path = f'{SNES_TIF_path}/ECNES/{name}_{presence_dict[val]}.tif'
     else:                   # SNES data
         val = row['PRESENCE_RANK']
         name = row['SCIENTIFIC_NAME'].replace('/', '_')
-        save_path = f'{SNES_TIF_PATH}/SNES/{row["TAXON_GROUP"]}/{name}/{name}_{presence_dict[val]}.tif'
+        save_path = f'{SNES_TIF_path}/SNES/{row["TAXON_GROUP"]}/{name}/{name}_{presence_dict[val]}.tif'
     
     # Replace spaces with underscores
     save_path = save_path.replace(' ', '_')
@@ -465,8 +482,8 @@ for _,row in snes_dissolve.iterrows():
     os.makedirs(folder, exist_ok=True)
     
 # Create folders for ECNES data; Only a single folder to store all the data
-if not os.path.exists(f'{SNES_TIF_PATH}/ECNES'):
-    os.makedirs(f'{SNES_TIF_PATH}/ECNES', exist_ok=True)
+if not os.path.exists(f'{SNES_TIF_path}/ECNES'):
+    os.makedirs(f'{SNES_TIF_path}/ECNES', exist_ok=True)
     
     
 
@@ -478,7 +495,7 @@ for _ in tqdm(Parallel(n_jobs=n_workers, return_as='generator')(tasks), total=le
 # Save SNES attributes to csv
 snes_meta = snes_dissolve.copy().drop(columns='geometry')
 snes_meta['TIF_PATH'] = snes_meta.apply(lambda x: get_presVal_savePath(x)[1], axis=1)
-snes_meta.to_csv(f'{SNES_TIF_PATH}/DCCEEW_SNES_meta.csv', index=False)
+snes_meta.to_csv(f'{SNES_TIF_path}/DCCEEW_SNES_meta.csv', index=False)
 
 
 
@@ -492,48 +509,52 @@ for out in tqdm(Parallel(n_jobs=n_workers, return_as='generator')(tasks), total=
 # Save ECNES attributes to csv
 ecnes_meta = ecnes_dissolve.copy().drop(columns='geometry')
 ecnes_meta['TIF_PATH'] = ecnes_meta.apply(lambda x: get_presVal_savePath(x)[1], axis=1)
-ecnes_meta.to_csv(f'{SNES_TIF_PATH}/DCCEEW_ECNES_meta.csv', index=False)
-
-
-
+ecnes_meta.to_csv(f'{SNES_TIF_path}/DCCEEW_ECNES_meta.csv', index=False)
 
 
 
 # ------------------- Masking GEOTIFFs and save SNES to NetCDF ------------------------------------------
 
-bio_DCCEEW_dir = 'N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF/To_NetCDF'
-
 # Read DCCEEW SNES GeoTIFF file paths
 SNES_meta = pd.read_csv('N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF/DCCEEW_SNES_meta.csv')
-ECNES_meta = pd.read_csv('N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF/DCCEEW_ECNES_meta.csv')
 
 
 # Create an empty array to store the data
 SNES_arr = xr.DataArray(
-    np.zeros((len(SNES_meta), NLUM.sum().values), dtype=np.bool_), 
-    dims=['species', 'cell'], 
-    coords={'species':SNES_meta['SCIENTIFIC_NAME'], 'cell':np.arange(NLUM.sum().values)}
-).assign_coords({
-    k: ('species', v.tolist())
-    for k, v in SNES_meta.items()
-    if k not in ['SCIENTIFIC_NAME', 'TIF_PATH']
-})
+    np.zeros((SNES_meta['SCIENTIFIC_NAME'].nunique(), SNES_meta['PRESENCE_RANK'].nunique(), NLUM.sum().item()), dtype=np.bool_),
+    dims=['species', 'presence', 'cell'],
+    coords={'species':SNES_meta['SCIENTIFIC_NAME'].unique(), 'presence':SNES_meta['PRESENCE_RANK'].unique(), 'cell':np.arange(NLUM.sum().item())}
+)
+
+
+# Create an empty dataframes to store the inside/outside LUTO data
+SNES_in_out_LUTO_area = pd.DataFrame({
+    'ALL_HA': np.zeros(len(SNES_meta)),
+    'NATURAL_IN_LUTO_HA': np.zeros(len(SNES_meta)),
+    'NATURAL_OUT_LUTO_HA': np.zeros(len(SNES_meta))
+}, index=SNES_meta.set_index(['SCIENTIFIC_NAME', 'PRESENCE_RANK']).index)
 
 
 # Parallel processing put the data into the empty array
 def get_arr(row):
     ds = rxr.open_rasterio(row['TIF_PATH']).sel(band=1).drop_vars('band')
     ds = xr.where(ds == ds.rio.nodata, 0, ds)
-    ds = xr.where(ds.isin([1, 2]), 1, 0)        # 1 is 'MAYBE', 2 is 'LIKELY'. We convert them to 1 so that we can use bool_ type
+    ds = xr.where(ds.isin([1, 2]), 1, 0).astype(np.bool_)      # 1 is 'MAYBE', 2 is 'LIKELY'. We convert them to 1 so that we can use bool_ type
     ds = ds.values.ravel()[np.flatnonzero(NLUM.values)]
-    return row['SCIENTIFIC_NAME'], ds
+    # Multiply by the real area (ha) to get the area weighted contribution
+    ds_all = ds * zones['CELL_HA'].values
+    # Multiply by the by the degradation score (2010) to get land-use degraded score
+    ds_in_LUTO = ds * idx_in_LUTO_natural * zones['CELL_HA'].values * biodiv_degrade_ly
+    ds_out_LUTO = ds * idx_out_LUTO_natural * zones['CELL_HA'].values
+    return row['SCIENTIFIC_NAME'], row['PRESENCE_RANK'], ds, ds_all.sum(), ds_in_LUTO.sum(), ds_out_LUTO.sum()
 
 tasks = (delayed(get_arr)(row) for _,row in SNES_meta.iterrows())
-for species,arr in tqdm(Parallel(n_jobs=-1, return_as='generator')(tasks), total=len(SNES_meta)):
+for species,rank,arr,all_area,in_area,out_area in tqdm(Parallel(n_jobs=20, return_as='generator')(tasks), total=len(SNES_meta)):
     SNES_arr.loc[species] = arr
+    SNES_in_out_LUTO_area.loc[species, rank] = [all_area, in_area, out_area]
+    
 
-
-# Save to nc, chunked by year, species, leave x, y as unlimited
+# Save to nc, chunked by species
 SNES_arr.name = 'data'
 SNES_arr.to_netcdf(
     f'{bio_DCCEEW_dir}/bio_DCCEEW_SNES.nc', 
@@ -542,10 +563,18 @@ SNES_arr.to_netcdf(
         "compression": "gzip", 
         "compression_opts": 9,  
         "dtype": 'bool',
-        "chunksizes": (1, SNES_arr.sizes['cell'])}}, 
+        "chunksizes": (1, 1, SNES_arr.sizes['cell'])}}, 
     engine='h5netcdf'
 )
 
+# Save the inside/outside LUTO data to csv
+SNES_df = SNES_in_out_LUTO_area.copy().reset_index()
+SNES_df['RATIO_2010_to_BASELINE'] = SNES_df['NATURAL_IN_LUTO_HA'] + SNES_df['NATURAL_OUT_LUTO_HA']
+SNES_df.insert(0,'RATIO_NATURAL_TO_ALL',  SNES_df['RATIO_2010_to_BASELINE'] / SNES_df['ALL_HA'])
+SNES_df = SNES_df.merge(SNES_meta, on=['SCIENTIFIC_NAME', 'PRESENCE_RANK'])
+SNES_df.insert(0, 'USER_DEFINED_TARGET_PERCENT', np.nan)
+SNES_df = SNES_df.drop(columns=['SHAPE_Length', 'SHAPE_Area', 'TIF_PATH'])
+SNES_df.sort_values('PRESENCE_RANK', ascending=False).to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_SNES_AREA_HA.csv', index=False)
 
 
 # ------------------- Masking GEOTIFFs and save ECNES to NetCDF ------------------------------------------
@@ -555,14 +584,17 @@ ECNES_meta = pd.read_csv('N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF/DCCEEW
 
 # Create an empty array to store the data
 ECNES_arr = xr.DataArray(
-    np.zeros((len(ECNES_meta), NLUM.sum().values), dtype=np.bool_), 
-    dims=['species', 'cell'], 
-    coords={'species':ECNES_meta['COMMUNITY'], 'cell':np.arange(NLUM.sum().values)}
-).assign_coords({
-    k: ('species', v.tolist())
-    for k, v in ECNES_meta.items() 
-    if k not in ['COMMUNITY', 'TIF_PATH']}
+    np.zeros((ECNES_meta['COMMUNITY'].nunique(), ECNES_meta['PRES_RANK'].nunique(), NLUM.sum().item()), dtype=np.bool_),
+    dims=['species', 'presence', 'cell'],
+    coords={'species':ECNES_meta['COMMUNITY'].unique(), 'presence':ECNES_meta['PRES_RANK'].unique(), 'cell':np.arange(NLUM.sum().item())}
 )
+
+# Create an empty dataframes to store the inside/outside LUTO data
+ECNES_in_out_LUTO_area = pd.DataFrame({
+    'ALL_HA': np.zeros(len(ECNES_meta)),
+    'NATURAL_IN_LUTO_HA': np.zeros(len(ECNES_meta)),
+    'NATURAL_OUT_LUTO_HA': np.zeros(len(ECNES_meta))
+}, index=ECNES_meta.set_index(['COMMUNITY', 'PRES_RANK']).index)
 
 
 # Parallel processing put the data into the empty array
@@ -571,14 +603,19 @@ def get_arr(row):
     ds = xr.where(ds == ds.rio.nodata, 0, ds)
     ds = xr.where(ds.isin([1, 2]), 1, 0)        # 1 is 'MAYBE', 2 is 'LIKELY'. We convert them to 1 so that we can use bool_ type
     ds = ds.values.ravel()[np.flatnonzero(NLUM.values)]
-    return row['COMMUNITY'], ds
+    # Multiply by the real area (ha) to get the area weighted contribution
+    ds_all = ds * zones['CELL_HA'].values
+    # Multiply by the by the degradation score (2010) to get land-use degraded score
+    ds_in_LUTO = ds * idx_in_LUTO_natural * zones['CELL_HA'].values * biodiv_degrade_ly
+    ds_out_LUTO = ds * idx_out_LUTO_natural * zones['CELL_HA'].values
+    return row['COMMUNITY'], row['PRES_RANK'], ds, ds_all.sum(), ds_in_LUTO.sum(), ds_out_LUTO.sum()
 
 tasks = (delayed(get_arr)(row) for _,row in ECNES_meta.iterrows())
-for species,arr in tqdm(Parallel(n_jobs=10, return_as='generator')(tasks), total=len(ECNES_meta)):
+for species,rank,arr,all_area,in_area,out_area in tqdm(Parallel(n_jobs=20, return_as='generator')(tasks), total=len(ECNES_meta)):
     ECNES_arr.loc[species] = arr
+    ECNES_in_out_LUTO_area.loc[species, rank] = [all_area, in_area, out_area]
 
-
-# Save to nc, chunked by year, species, leave x, y as unlimited
+# Save to nc, chunked by species
 ECNES_arr.name = 'data'
 ECNES_arr.to_netcdf(
     f'{bio_DCCEEW_dir}/bio_DCCEEW_ECNES.nc', 
@@ -587,9 +624,19 @@ ECNES_arr.to_netcdf(
         "compression": "gzip", 
         "compression_opts": 9,  
         "dtype": 'bool',
-        "chunksizes": (1, ECNES_arr.sizes['cell'])}}, 
+        "chunksizes": (1, 1, ECNES_arr.sizes['cell'])}}, 
     engine='h5netcdf'
 )
+
+# Save the inside/outside LUTO data to csv
+ECNES_df = ECNES_in_out_LUTO_area.copy().reset_index()
+ECNES_df['RATIO_2010_to_BASELINE'] = ECNES_df['NATURAL_IN_LUTO_HA'] + ECNES_df['NATURAL_OUT_LUTO_HA']
+ECNES_df.insert(0,'RATIO_NATURAL_TO_ALL',  ECNES_df['RATIO_2010_to_BASELINE'] / ECNES_df['ALL_HA'])
+ECNES_df = ECNES_df.merge(ECNES_meta, on=['COMMUNITY', 'PRES_RANK'])
+ECNES_df.insert(0, 'USER_DEFINED_TARGET_PERCENT', np.nan)
+
+ECNES_df = ECNES_df.drop(columns=['SHAPE_Length', 'SHAPE_Area', 'TIF_PATH'])
+ECNES_df.sort_values('PRES_RANK', ascending=False).to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_ECNES_AREA_HA.csv', index=False)
 
 
 
@@ -761,29 +808,11 @@ for gdb_path, layer_raster, layer_attribute in files:
 
 # --------------- Get the sum of areas (ha) for pre-1750 ---------------
 
-# Read raw zones and lumap database
-zones = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5', key='cell_zones_df', columns=['CELL_HA'])
-bioph = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5', key = 'cell_biophysical_df', columns=['NATURAL_AREA_INC_WATER'])
-lumap = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', key = 'cell_LU_mapping', columns=['LU_DESC'])
-
-natural_cells = np.logical_not(bioph['NATURAL_AREA_INC_WATER'].values) # 0 is natural, 1 is non-natural; so we flip the values to make 1 natural
-
-# Get the index of cells that are outside the LUTO study area, AND, also in natural state
-idx_out_LUTO = np.isin(lumap['LU_DESC'], ['Non-agricultural land'])     # shape=6956407, sum=2737674
-idx_out_LUTO_natural = idx_out_LUTO & natural_cells
-
-# Get the index of cells that are inside the LUTO study area, AND, also in natural state
-idx_in_LUTO_natural = np.isin(lumap['LU_DESC'], ['Beef - natural land', 'Dairy - natural land', 'Sheep - natural land', 'Unallocated - natural land'])
-
-
-
 # Read NVIS data
-PRE1750_path = 'N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL'
-
-NVIS_pre_mvg_xr_low_spatial_detail = xr.load_dataarray(f'{PRE1750_path}/NVIS7_0_AUST_PRE_MVG_LOW_SPATIAL_DETAIL.nc')
-NVIS_pre_mvs_xr_low_spatial_detail = xr.load_dataarray(f'{PRE1750_path}/NVIS7_0_AUST_PRE_MVS_LOW_SPATIAL_DETAIL.nc')
-NVIS_pre_mvg_xr_high_spatial_detail = xr.load_dataarray(f'{PRE1750_path}/NVIS7_0_AUST_PRE_MVG_HIGH_SPATIAL_DETAIL.nc') / 100  # Convert percentage to fraction
-NVIS_pre_mvs_xr_high_spatial_detail = xr.load_dataarray(f'{PRE1750_path}/NVIS7_0_AUST_PRE_MVS_HIGH_SPATIAL_DETAIL.nc') / 100  # Convert percentage to fraction
+NVIS_pre_mvg_xr_low_spatial_detail = xr.load_dataarray(f'{NVIS_PRE_1750_path}/NVIS7_0_AUST_PRE_MVG_LOW_SPATIAL_DETAIL.nc')
+NVIS_pre_mvs_xr_low_spatial_detail = xr.load_dataarray(f'{NVIS_PRE_1750_path}/NVIS7_0_AUST_PRE_MVS_LOW_SPATIAL_DETAIL.nc')
+NVIS_pre_mvg_xr_high_spatial_detail = xr.load_dataarray(f'{NVIS_PRE_1750_path}/NVIS7_0_AUST_PRE_MVG_HIGH_SPATIAL_DETAIL.nc') / 100  # Convert percentage to fraction
+NVIS_pre_mvs_xr_high_spatial_detail = xr.load_dataarray(f'{NVIS_PRE_1750_path}/NVIS7_0_AUST_PRE_MVS_HIGH_SPATIAL_DETAIL.nc') / 100  # Convert percentage to fraction
 
 # Get the NVIS names
 NVIS_pre_mvg_names = NVIS_pre_mvg_xr_high_spatial_detail.coords['group'].values.tolist()
@@ -898,10 +927,10 @@ NVIS_pre_mvs_low_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
 NVIS_pre_mvs_high_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
 
 # Save to CSV
-NVIS_pre_mvg_low_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVG_LOW_SPATIAL_DETAIL.csv', index=False)
-NVIS_pre_mvg_high_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVG_HIGH_SPATIAL_DETAIL.csv', index=False)
-NVIS_pre_mvs_low_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVS_LOW_SPATIAL_DETAIL.csv', index=False)
-NVIS_pre_mvs_high_spatial_detail.to_csv(PRE1750_path + '/NVIS_MVS_HIGH_SPATIAL_DETAIL.csv', index=False)
+NVIS_pre_mvg_low_spatial_detail.to_csv(NVIS_PRE_1750_path + '/NVIS_MVG_LOW_SPATIAL_DETAIL.csv', index=False)
+NVIS_pre_mvg_high_spatial_detail.to_csv(NVIS_PRE_1750_path + '/NVIS_MVG_HIGH_SPATIAL_DETAIL.csv', index=False)
+NVIS_pre_mvs_low_spatial_detail.to_csv(NVIS_PRE_1750_path + '/NVIS_MVS_LOW_SPATIAL_DETAIL.csv', index=False)
+NVIS_pre_mvs_high_spatial_detail.to_csv(NVIS_PRE_1750_path + '/NVIS_MVS_HIGH_SPATIAL_DETAIL.csv', index=False)
 
 
 
