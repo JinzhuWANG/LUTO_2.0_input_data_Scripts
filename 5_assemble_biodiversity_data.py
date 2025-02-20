@@ -65,6 +65,7 @@ idx_in_LUTO_natural = np.isin(lumap['LU_DESC'], ['Beef - natural land', 'Dairy -
 idx_out_LUTO = np.isin(lumap['LU_DESC'], ['Non-agricultural land'])     # shape=6956407, sum=2737674
 idx_out_LUTO_natural = idx_out_LUTO & natural_cells
 
+# Get the 2D layers that are in natural state, inside/outside the LUTO study area
 idx_in_LUTO_natural_2D = NLUM_zero.copy()
 np.place(idx_in_LUTO_natural_2D.values, NLUM.values, idx_in_LUTO_natural.astype('uint8'))
 idx_out_LUTO_natural_2D = NLUM_zero.copy()
@@ -330,16 +331,14 @@ for nc in bio_condition_ncs:
         # Reproject the data to match NLUM
         arr = arr.rio.set_crs(NLUM.rio.crs)
         arr = arr.rio.reproject_match(NLUM, resample=rasterio.enums.Resampling.bilinear) 
-        # Multiply by the real area (ha) to get the area weighted contribution
+        # Multiply by the real area (ha) to get the biodiversity suitability score (i.e., area weighted suitability)
         arr = (arr * real_area_ha_2D).astype('float32')
         
         if sel_year == 1990:
+            # Sum of biodiversity suitability score without degradation
             all_sum = arr.sum(['y', 'x']).values
-            in_sum = arr.where(idx_in_LUTO_natural_2D).sum(['y', 'x']).values
-            out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
-        elif sel_year == 2010:
+            # Biodiversity suitability score with degradation
             arr = arr * biodiv_degrade_ly_2D
-            all_sum = arr.sum(['y', 'x']).values
             in_sum = arr.where(idx_in_LUTO_natural_2D).sum(['y', 'x']).values
             out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
         else:
@@ -362,33 +361,35 @@ for nc in bio_condition_ncs:
 
 
 
-# Get the biodiversity score for the baseline year (1990), as well as the in/out LUTO scores
+# Get the biodiversity target
+'''
+The habitat suitability baselines are same for all SSPs, so here use SSP245 to calculate the baseline
+'''
+bio_score_baseline = pd.read_csv(f'{bio_Carla_NetCDF_dir}/bio_ssp245_EnviroSuit_Score.csv').query('year == 1990')
+bio_score_baseline = bio_score_baseline.pivot(index=['species'], columns='source', values='BIO_SUITABILITY_AREA_WEIGHTED_SCORE_HA').reset_index()
+bio_score_baseline['HABITAT_SUITABILITY_BASELINE'] = bio_score_baseline.eval('(`in` + `out`) / `all`') * 100
+
+# Create a habitat suitability target csv file
+bio_target = bio_score_baseline[['species', 'HABITAT_SUITABILITY_BASELINE']].copy()
+bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
+bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
+bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
+bio_target.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_TARGET.csv', index=False)
+
+
+# Get the biodiversity suitability area weighted scores for each SSP
 bio_scores = pd.DataFrame()
 
 for f in glob(f'{bio_Carla_NetCDF_dir}/*_Score.csv'):
-    
     ssp = re.compile(r'bio_ssp(\d*)_').findall(f)[0]
-    bio_baseline = pd.read_csv(f).query('year == 1990').query('source == "all"')
-    bio_in = pd.read_csv(f).query('year != 1990').query('source == "in"')
-    bio_out = pd.read_csv(f).query('year != 1990').query('source == "out"')
-    
-    # Combine baseline and in/out LUTO scores
-    bio_df = pd.concat([bio_baseline, bio_in, bio_out], ignore_index=True)
-    bio_df['SSP'] = ssp
-    bio_scores = pd.concat([bio_scores, bio_df], ignore_index=True)
-     
+    bio_out = pd.read_csv(f).query('year != 1990').query('source == "out"').drop(columns=['source']).set_index(['species', 'year'])
+    bio_out = bio_out.rename(columns={'BIO_SUITABILITY_AREA_WEIGHTED_SCORE_HA': f'OUTSIDE_LUTO_NATURAL_AREA_WEIGHTED_HA_SSP{ssp}'})
+    bio_scores = pd.concat([bio_scores, bio_out], axis=1)
 
-# Save to disk
+bio_scores = bio_scores.reset_index()
+bio_scores = bio_scores.merge(bio_score_baseline[['species', 'all']], on='species', how='left')
+bio_scores = bio_scores.rename(columns={'all': 'HABITAT_SUITABILITY_BASELINE'})
 bio_scores.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_SCORES.csv', index=False)
-
-
-# Calculate the percentage of bio score for 2010 to 1990
-bio_target = bio_scores.pivot(index=['species', 'SSP'], columns='source', values='BIO_SCORE_HA').reset_index()
-bio_target['RATIO_2010_to_BASELINE'] = bio_target.eval('(`in` + `out`) / `all`')
-bio_target = bio_target[['RATIO_2010_to_BASELINE','species', 'SSP']]
-bio_target.columns.name = None
-bio_target.insert(0, 'USER_DEFINED_TARGET_PERCENT', np.nan)
-bio_target.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_TARGET.csv', index=False)
 
 
 
@@ -535,7 +536,7 @@ SNES_in_out_LUTO_area = pd.DataFrame({
 }, index=SNES_meta.set_index(['SCIENTIFIC_NAME', 'PRESENCE_RANK']).index)
 
 
-# Parallel processing put the data into the empty array
+# Parallel processing to put the data into the empty array
 def get_arr(row):
     ds = rxr.open_rasterio(row['TIF_PATH']).sel(band=1).drop_vars('band')
     ds = xr.where(ds == ds.rio.nodata, 0, ds)
@@ -543,7 +544,7 @@ def get_arr(row):
     ds = ds.values.ravel()[np.flatnonzero(NLUM.values)]
     # Multiply by the real area (ha) to get the area weighted contribution
     ds_all = ds * zones['CELL_HA'].values
-    # Multiply by the by the degradation score (2010) to get land-use degraded score
+    # Multiply by the by the degradation score to get degraded habitat significance score
     ds_in_LUTO = ds * idx_in_LUTO_natural * zones['CELL_HA'].values * biodiv_degrade_ly
     ds_out_LUTO = ds * idx_out_LUTO_natural * zones['CELL_HA'].values
     return row['SCIENTIFIC_NAME'], row['PRESENCE_RANK'], ds, ds_all.sum(), ds_in_LUTO.sum(), ds_out_LUTO.sum()
@@ -567,14 +568,70 @@ SNES_arr.to_netcdf(
     engine='h5netcdf'
 )
 
+
+# Get the shared atributs of the SNES data
+SNES_meta_att = SNES_meta.groupby(['SCIENTIFIC_NAME']).apply(lambda df: df.iloc[0], include_groups=False)
+SNES_meta_att = SNES_meta_att.drop(columns=['PRESENCE_CATEGORY', 'PRESENCE_RANK','SHAPE_Length', 'SHAPE_Area', 'TIF_PATH']).reset_index()
+
 # Save the inside/outside LUTO data to csv
 SNES_df = SNES_in_out_LUTO_area.copy().reset_index()
-SNES_df['RATIO_2010_to_BASELINE'] = SNES_df['NATURAL_IN_LUTO_HA'] + SNES_df['NATURAL_OUT_LUTO_HA']
-SNES_df.insert(0,'RATIO_NATURAL_TO_ALL',  SNES_df['RATIO_2010_to_BASELINE'] / SNES_df['ALL_HA'])
-SNES_df = SNES_df.merge(SNES_meta, on=['SCIENTIFIC_NAME', 'PRESENCE_RANK'])
-SNES_df.insert(0, 'USER_DEFINED_TARGET_PERCENT', np.nan)
-SNES_df = SNES_df.drop(columns=['SHAPE_Length', 'SHAPE_Area', 'TIF_PATH'])
-SNES_df.sort_values('PRESENCE_RANK', ascending=False).to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_SNES_AREA_HA.csv', index=False)
+SNES_df['HABITAT_SIGNIFICANCE_PRESTINE_AUSTRALIA'] = SNES_df['ALL_HA']
+SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = SNES_df['NATURAL_IN_LUTO_HA'] + SNES_df['NATURAL_OUT_LUTO_HA']
+SNES_df['HABITAT_SIGNIFICANCE_BASELINE_PERCENT'] = SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] / SNES_df['ALL_HA'] * 100
+
+# Fill the missing SCIENTIFIC_NAME and PRESENCE_RANK with nan
+re_index = pd.MultiIndex.from_product([SNES_df['SCIENTIFIC_NAME'].unique(), SNES_df['PRESENCE_RANK'].unique()], names=['SCIENTIFIC_NAME', 'PRESENCE_RANK'])
+SNES_df = SNES_df.set_index(['SCIENTIFIC_NAME', 'PRESENCE_RANK']).reindex(re_index).reset_index()
+
+# Drop unneeded columns, and split the data into three dataframes based on the PRESENCE_RANK
+SNES_df = SNES_df.drop(columns=['ALL_HA', 'NATURAL_IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA'])
+SNES_df_LIKELY = SNES_df.query('PRESENCE_RANK == 2').copy().drop(columns=['PRESENCE_RANK'])
+SNES_df_MAYBE = SNES_df.query('PRESENCE_RANK == 1').copy().drop(columns=['PRESENCE_RANK'])
+
+# Append suffix to the columns for the LIKELY and MAYBE dataframes
+SNES_df_LIKELY.columns = [f'{col}_LIKELY' if col != 'SCIENTIFIC_NAME' else 'SCIENTIFIC_NAME' for col in SNES_df_LIKELY.columns]
+SNES_df_MAYBE.columns = [f'{col}_MAYBE' if col != 'SCIENTIFIC_NAME' else 'SCIENTIFIC_NAME' for col in SNES_df_MAYBE.columns]
+
+# Add user defined columns to the LIKELY and MAYBE dataframes
+SNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2100_LIKELY', np.nan)
+SNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2050_LIKELY', np.nan)
+SNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2030_LIKELY', np.nan)
+
+SNES_df_MAYBE.insert(0, 'USER_DEFINED_TARGET_PERCENT_2100_MAYBE', np.nan)
+SNES_df_MAYBE.insert(0, 'USER_DEFINED_TARGET_PERCENT_2050_MAYBE', np.nan)
+SNES_df_MAYBE.insert(0, 'USER_DEFINED_TARGET_PERCENT_2030_MAYBE', np.nan)
+
+# Merge the LIKELY and MAYBE dataframes, and append the shared attributes
+SNES_df = SNES_df_LIKELY.merge(SNES_df_MAYBE, on='SCIENTIFIC_NAME', how='outer')
+SNES_df = SNES_df.merge(SNES_meta_att, on='SCIENTIFIC_NAME')
+
+
+# Reorder the columns
+cols = ['SCIENTIFIC_NAME',
+        
+        'HABITAT_SIGNIFICANCE_BASELINE_PERCENT_LIKELY',
+        'USER_DEFINED_TARGET_PERCENT_2030_LIKELY',
+        'USER_DEFINED_TARGET_PERCENT_2050_LIKELY',
+        'USER_DEFINED_TARGET_PERCENT_2100_LIKELY',
+         
+        'HABITAT_SIGNIFICANCE_BASELINE_PERCENT_MAYBE',
+        'USER_DEFINED_TARGET_PERCENT_2030_MAYBE',
+        'USER_DEFINED_TARGET_PERCENT_2050_MAYBE',
+        'USER_DEFINED_TARGET_PERCENT_2100_MAYBE',
+        
+        'HABITAT_SIGNIFICANCE_PRESTINE_AUSTRALIA_LIKELY',
+        'HABITAT_SIGNIFICANCE_PRESTINE_AUSTRALIA_MAYBE',
+        
+         'LISTED_TAXON_ID',
+         'MAP_TAXON_ID', 'VERNACULAR_NAME', 'THREATENED_STATUS',
+         'MIGRATORY_STATUS', 'MARINE', 'CETACEAN', 'EXTRACT_DATE', 'TAXON_GROUP',
+         'TAXON_FAMILY', 'TAXON_ORDER', 'TAXON_CLASS', 'TAXON_PHYLUM',
+         'TAXON_KINGDOM', 'OTHER_IDS', 'CELL_SIZE', 'REGIONS', 'ATTRIBUTION',
+         'SPRAT_PROFILE']
+
+SNES_df = SNES_df[cols]
+SNES_df.to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_SNES_AREA_HA.csv', index=False)
+
 
 
 # ------------------- Masking GEOTIFFs and save ECNES to NetCDF ------------------------------------------
@@ -628,15 +685,62 @@ ECNES_arr.to_netcdf(
     engine='h5netcdf'
 )
 
+# Get the shared atributs of the ECNES data
+ECNES_meta_att = ECNES_meta.groupby(['COMMUNITY']).apply(lambda df: df.iloc[0], include_groups=False)
+ECNES_meta_att = ECNES_meta_att.drop(columns=['PRES_RANK', 'SHAPE_Length', 'SHAPE_Area', 'TIF_PATH']).reset_index()
+
 # Save the inside/outside LUTO data to csv
 ECNES_df = ECNES_in_out_LUTO_area.copy().reset_index()
-ECNES_df['RATIO_2010_to_BASELINE'] = ECNES_df['NATURAL_IN_LUTO_HA'] + ECNES_df['NATURAL_OUT_LUTO_HA']
-ECNES_df.insert(0,'RATIO_NATURAL_TO_ALL',  ECNES_df['RATIO_2010_to_BASELINE'] / ECNES_df['ALL_HA'])
-ECNES_df = ECNES_df.merge(ECNES_meta, on=['COMMUNITY', 'PRES_RANK'])
-ECNES_df.insert(0, 'USER_DEFINED_TARGET_PERCENT', np.nan)
+ECNES_df['HABITAT_SIGNIFICANCE_PRESTINE_AUSTRALIA'] = ECNES_df['ALL_HA']
+ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = ECNES_df['NATURAL_IN_LUTO_HA'] + ECNES_df['NATURAL_OUT_LUTO_HA']
+ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_PERCENT'] = ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] / ECNES_df['ALL_HA'] * 100
 
-ECNES_df = ECNES_df.drop(columns=['SHAPE_Length', 'SHAPE_Area', 'TIF_PATH'])
-ECNES_df.sort_values('PRES_RANK', ascending=False).to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_ECNES_AREA_HA.csv', index=False)
+# Fill the missing COMMUNITY and PRES_RANK with nan
+re_index = pd.MultiIndex.from_product([ECNES_df['COMMUNITY'].unique(), ECNES_df['PRES_RANK'].unique()], names=['COMMUNITY', 'PRES_RANK'])
+ECNES_df = ECNES_df.set_index(['COMMUNITY', 'PRES_RANK']).reindex(re_index).reset_index()
+    
+# Drop unneeded columns, and split the data into three dataframes based on the PRES_RANK
+ECNES_df = ECNES_df.drop(columns=['ALL_HA', 'NATURAL_IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA'])
+ECNES_df_LIKELY = ECNES_df.query('PRES_RANK == 2').copy().drop(columns=['PRES_RANK'])
+ECNES_df_MAYBE = ECNES_df.query('PRES_RANK == 1').copy().drop(columns=['PRES_RANK'])
+
+# Append suffix to the columns for the LIKELY and MAYBE dataframes
+ECNES_df_LIKELY.columns = [f'{col}_LIKELY' if col != 'COMMUNITY' else 'COMMUNITY' for col in ECNES_df_LIKELY.columns]
+ECNES_df_MAYBE.columns = [f'{col}_MAYBE' if col != 'COMMUNITY' else 'COMMUNITY' for col in ECNES_df_MAYBE.columns]
+
+# Add user defined columns to the LIKELY and MAYBE dataframes
+ECNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2100_LIKELY', np.nan)
+ECNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2050_LIKELY', np.nan)
+ECNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2030_LIKELY', np.nan)
+
+ECNES_df_MAYBE.insert(0, 'USER_DEFINED_TARGET_PERCENT_2100_MAYBE', np.nan)
+ECNES_df_MAYBE.insert(0, 'USER_DEFINED_TARGET_PERCENT_2050_MAYBE', np.nan)
+ECNES_df_MAYBE.insert(0, 'USER_DEFINED_TARGET_PERCENT_2030_MAYBE', np.nan)
+
+# Merge the LIKELY and MAYBE dataframes, and append the shared attributes
+ECNES_df = ECNES_df_LIKELY.merge(ECNES_df_MAYBE, on='COMMUNITY', how='outer')
+ECNES_df = ECNES_df.merge(ECNES_meta_att, on='COMMUNITY')
+
+# Reorder the columns
+cols = ['COMMUNITY',
+        
+        'HABITAT_SIGNIFICANCE_BASELINE_PERCENT_LIKELY',
+        'USER_DEFINED_TARGET_PERCENT_2030_LIKELY',
+        'USER_DEFINED_TARGET_PERCENT_2050_LIKELY',
+        'USER_DEFINED_TARGET_PERCENT_2100_LIKELY',
+         
+        'HABITAT_SIGNIFICANCE_BASELINE_PERCENT_MAYBE',
+        'USER_DEFINED_TARGET_PERCENT_2030_MAYBE',
+        'USER_DEFINED_TARGET_PERCENT_2050_MAYBE',
+        'USER_DEFINED_TARGET_PERCENT_2100_MAYBE',
+        
+        'HABITAT_SIGNIFICANCE_PRESTINE_AUSTRALIA_LIKELY',
+        'HABITAT_SIGNIFICANCE_PRESTINE_AUSTRALIA_MAYBE',
+        
+        'CATEGORY', 'COM_ID','EPBC', 'EXTRACTED', 'CELL_SIZE', 'REGIONS', 'CITATION', 'SPRAT']
+
+ECNES_df = ECNES_df[cols]
+ECNES_df.to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_ECNES_AREA_HA.csv', index=False)
 
 
 
