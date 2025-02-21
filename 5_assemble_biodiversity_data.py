@@ -370,7 +370,12 @@ bio_score_baseline = bio_score_baseline.pivot(index=['species'], columns='source
 bio_score_baseline['HABITAT_SUITABILITY_BASELINE'] = bio_score_baseline.eval('(`in` + `out`) / `all`') * 100
 
 # Create a habitat suitability target csv file
-bio_target = bio_score_baseline[['species', 'HABITAT_SUITABILITY_BASELINE']].copy()
+bio_target = bio_score_baseline[['species', 'HABITAT_SUITABILITY_BASELINE','all','out']].copy()
+bio_target = bio_target.rename(columns={
+    'all': 'HABITAT_SUITABILITY_BASELINE_SCORE_ALL_AUSTRALIA',
+    'out': 'HABITAT_SUITABILITY_BASELINE_SCORE_OUTSIDE_LUTO',
+    'HABITAT_SUITABILITY_BASELINE': 'HABITAT_SUITABILITY_BASELINE_PERCENT'
+})
 bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
 bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
 bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
@@ -383,12 +388,10 @@ bio_scores = pd.DataFrame()
 for f in glob(f'{bio_Carla_NetCDF_dir}/*_Score.csv'):
     ssp = re.compile(r'bio_ssp(\d*)_').findall(f)[0]
     bio_out = pd.read_csv(f).query('year != 1990').query('source == "out"').drop(columns=['source']).set_index(['species', 'year'])
-    bio_out = bio_out.rename(columns={'BIO_SUITABILITY_AREA_WEIGHTED_SCORE_HA': f'OUTSIDE_LUTO_NATURAL_AREA_WEIGHTED_HA_SSP{ssp}'})
+    bio_out = bio_out.rename(columns={'BIO_SUITABILITY_AREA_WEIGHTED_SCORE_HA': f'OUTSIDE_LUTO_NATURAL_SUITABILITY_AREA_WEIGHTED_HA_SSP{ssp}'})
     bio_scores = pd.concat([bio_scores, bio_out], axis=1)
 
 bio_scores = bio_scores.reset_index()
-bio_scores = bio_scores.merge(bio_score_baseline[['species', 'all']], on='species', how='left')
-bio_scores = bio_scores.rename(columns={'all': 'HABITAT_SUITABILITY_BASELINE'})
 bio_scores.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_SCORES.csv', index=False)
 
 
@@ -575,7 +578,8 @@ SNES_meta_att = SNES_meta_att.drop(columns=['PRESENCE_CATEGORY', 'PRESENCE_RANK'
 
 # Save the inside/outside LUTO data to csv
 SNES_df = SNES_in_out_LUTO_area.copy().reset_index()
-SNES_df['HABITAT_SIGNIFICANCE_PRESTINE_AUSTRALIA'] = SNES_df['ALL_HA']
+SNES_df['HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA'] = SNES_df['ALL_HA']
+SNES_df['HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL'] = SNES_df['NATURAL_OUT_LUTO_HA']
 SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = SNES_df['NATURAL_IN_LUTO_HA'] + SNES_df['NATURAL_OUT_LUTO_HA']
 SNES_df['HABITAT_SIGNIFICANCE_BASELINE_PERCENT'] = SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] / SNES_df['ALL_HA'] * 100
 
@@ -619,9 +623,11 @@ cols = ['SCIENTIFIC_NAME',
         'USER_DEFINED_TARGET_PERCENT_2050_MAYBE',
         'USER_DEFINED_TARGET_PERCENT_2100_MAYBE',
         
-        'HABITAT_SIGNIFICANCE_PRESTINE_AUSTRALIA_LIKELY',
-        'HABITAT_SIGNIFICANCE_PRESTINE_AUSTRALIA_MAYBE',
-        
+        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY',
+        'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY',
+        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_MAYBE',
+
          'LISTED_TAXON_ID',
          'MAP_TAXON_ID', 'VERNACULAR_NAME', 'THREATENED_STATUS',
          'MIGRATORY_STATUS', 'MARINE', 'CETACEAN', 'EXTRACT_DATE', 'TAXON_GROUP',
@@ -630,7 +636,7 @@ cols = ['SCIENTIFIC_NAME',
          'SPRAT_PROFILE']
 
 SNES_df = SNES_df[cols]
-SNES_df.to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_SNES_AREA_HA.csv', index=False)
+SNES_df.to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_SNES_target.csv', index=False)
 
 
 
@@ -691,7 +697,8 @@ ECNES_meta_att = ECNES_meta_att.drop(columns=['PRES_RANK', 'SHAPE_Length', 'SHAP
 
 # Save the inside/outside LUTO data to csv
 ECNES_df = ECNES_in_out_LUTO_area.copy().reset_index()
-ECNES_df['HABITAT_SIGNIFICANCE_PRESTINE_AUSTRALIA'] = ECNES_df['ALL_HA']
+ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA'] = ECNES_df['ALL_HA']
+ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL'] = ECNES_df['NATURAL_OUT_LUTO_HA']
 ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = ECNES_df['NATURAL_IN_LUTO_HA'] + ECNES_df['NATURAL_OUT_LUTO_HA']
 ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_PERCENT'] = ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] / ECNES_df['ALL_HA'] * 100
 
@@ -734,13 +741,15 @@ cols = ['COMMUNITY',
         'USER_DEFINED_TARGET_PERCENT_2050_MAYBE',
         'USER_DEFINED_TARGET_PERCENT_2100_MAYBE',
         
-        'HABITAT_SIGNIFICANCE_PRESTINE_AUSTRALIA_LIKELY',
-        'HABITAT_SIGNIFICANCE_PRESTINE_AUSTRALIA_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY',
+        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY',
+        'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_MAYBE',
         
         'CATEGORY', 'COM_ID','EPBC', 'EXTRACTED', 'CELL_SIZE', 'REGIONS', 'CITATION', 'SPRAT']
 
 ECNES_df = ECNES_df[cols]
-ECNES_df.to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_ECNES_AREA_HA.csv', index=False)
+ECNES_df.to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_ECNES_target.csv', index=False)
 
 
 
