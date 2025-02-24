@@ -531,6 +531,49 @@ print('Number of NaNs =', cell_df[cell_df.isna().any(axis = 1)].shape[0])
 
 
 
+################################ Read SLA shapefile in to GeoPandas GeoDataFrame, convert to raster to match NLUM, save, join to cell_df dataframe
+SLA_gdf = gpd.read_file('N:/Data-Master/Australian_administrative_boundaries/sla_2010_aus/SLA10aAust.shp')
+
+# Downcast SLA_5DIGIT for conversion to raster
+SLA_gdf['SLA_5DIGIT'] = pd.to_numeric(SLA_gdf['SLA_5DIGIT'], downcast = 'integer')
+
+# Access geometry and field to rasterise
+shapes = ((geom, value) for geom, value in zip(SLA_gdf.geometry, SLA_gdf.SLA_5DIGIT))
+
+# Open a new GeoTiFF file
+with rasterio.open('N:/Data-Master/Australian_administrative_boundaries/sla_2010_aus/SLA_raster_filled.tif', 'w+', dtype = 'int32', nodata = 0, **meta) as out:
+    
+    # Rasterise SA2 shapefile
+    newrast = features.rasterize(shapes = shapes, fill = 0, out = out.read(1), transform = out.transform)
+    
+    # Find cells to fill
+    msk = (newrast == 0)
+
+    # Fill nodata in SA2 raster using value of nearest cell to match NLUM mask
+    ind = nd.distance_transform_edt(msk, return_distances = False, return_indices = True)
+    raster_filled = newrast[tuple(ind)]
+    SLA_raster_clipped = raster_filled * NLUM_mask
+    
+    # Save output to GeoTiff
+    out.write_band(1, SLA_raster_clipped)
+    
+# Flatten the SA2 2D array to 1D array of valid values only, add SA2_ID to cell_df dataframe
+cell_df['SLA_5DIGIT'] = SLA_raster_clipped[NLUM_mask]
+cell_df['SLA_5DIGIT'] = pd.to_numeric(cell_df['SLA_5DIGIT'], downcast = 'integer')
+
+# Join SA2 table to the cell_df dataframe
+tmp_df = SLA_gdf[['SLA_5DIGIT', 'SLA_NAME10']]
+cell_df = cell_df.merge(tmp_df, how = 'left', left_on = 'SLA_5DIGIT', right_on = 'SLA_5DIGIT')
+
+# Downcast int64 columns and convert object to category to save memory and space
+downcast(cell_df)
+
+# Plot and print out data, check that there are no NaNs
+cell_df.info()
+print('Number of grid cells =', cell_df.shape[0])
+print('Number of NaNs =', cell_df[cell_df.isna().any(axis = 1)].shape[0])
+
+
 
 
 ################################ Read BOM GeoFabric HR Regions River Regions Geodatabase file in to GeoPandas GeoDataFrame, convert to raster to match NLUM, save, join to cell_df dataframe
