@@ -251,56 +251,28 @@ bio_suitability_ncs = glob(f'{bio_Carla_NetCDF_dir}/*_EnviroSuit.nc')
   
 # Save nc to disk
 for nc in bio_suitability_ncs:
-
     
-    fname = os.path.basename(nc).replace('_EnviroSuit.nc', '_Condition')
+    fname = os.path.basename(nc).replace('_EnviroSuit.nc', '_EnviroSuit_group')
     bio_species_suitability = xr.open_dataset(nc, chunks={'year':1, 'species':1})['data']
     years = set(bio_species_suitability['year'].values)
     groups = set(bio_species_suitability['group'].values)
     
-    # Create an empty array to store the data
-    group_arr_contribution = xr.DataArray(
-        np.zeros((
-            len(years),  
-            len(groups), 
-            bio_species_suitability.sizes['y'], 
-            bio_species_suitability.sizes['x']), dtype='float32'
-        ), 
-        dims=['year', 'group', 'y', 'x'], 
-        coords={
-            'year':sorted(years),
-            'group':sorted(groups), 
-            'y':bio_species_suitability['y'],
-            'x':bio_species_suitability['x']
-        }
-    )
-    
-    # Calculate the biodiversity contribution scores for each group
-    for sel_group in groups:
-        
-        group_arr = bio_species_suitability.groupby('group')[sel_group]
-        # Divide by the number of species to avoide large number overflows in later sum calculation
-        group_arr = group_arr.astype('float32') / group_arr.sizes['species']        
-        # Calculate the contribution of the group to the total biodiversity
-        group_arr_contr = group_arr.sum('species') / group_arr.sel(year=1990, drop=True).sum(['species', 'y', 'x'])
-        # Multiply by the real area (ha) to get the area weighted contribution
-        group_arr_contribution.loc[:, sel_group] = group_arr_contr.values * bio_arr_area_ha
-
+    # Calculate the sum of biodiversity contribution scores for each group
+    group_arr_sum = bio_species_suitability.groupby('group').sum()
 
     # Save to nc, chunked by year, group, leave x, y as unlimited
-    group_arr_contribution.name = 'data'
-    group_arr_contribution.to_netcdf(
-        f'{bio_Carla_NetCDF_dir}/{fname}_group.nc', 
+    group_arr_sum.name = 'data'
+    group_arr_sum.to_netcdf(
+        f'{bio_Carla_NetCDF_dir}/{fname}.nc', 
         mode='w', 
         encoding={'data': {
             'compression': 'gzip', 
             'compression_opts': 9, 
-            'dtype': 'float32',
-            'chunksizes': (1, 1, group_arr_contribution.sizes['y'], group_arr_contribution.sizes['x'])}}, 
+            'dtype': 'uint32',
+            'chunksizes': (1, 1, group_arr_sum.sizes['y'], group_arr_sum.sizes['x'])}}, 
         engine='h5netcdf'
     )
-    
-    del group_arr_contribution
+
 
 
 
@@ -393,6 +365,96 @@ for f in glob(f'{bio_Carla_NetCDF_dir}/*_Score.csv'):
 
 bio_scores = bio_scores.reset_index()
 bio_scores.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_SCORES.csv', index=False)
+
+
+
+
+# ------------------- Calculate the biodiversity score for each species  ------------------------------------------
+
+# Calculate the contribution, with real_area weighted
+bio_condition_ncs = glob(f'{bio_Carla_NetCDF_dir}/*_EnviroSuit_group.nc')
+
+for nc in bio_condition_ncs:
+    fname = os.path.basename(nc).replace('_group.nc', '_group_Score')
+    # Biodiversity scores for ALL Australia, inside LUTO study area, and outside LUTO study area
+    score_sources = ['all', 'in', 'out']
+    # Read the data
+    bio_group = xr.open_dataarray(nc, chunks={'year':1,'group':1})
+
+    # Calculate the biodiversity score for each group
+    bio_group_sum = xr.DataArray(
+        np.zeros((bio_group.sizes['year'], bio_group.sizes['group'], len(score_sources)), dtype='float32'),
+        dims=['year', 'group', 'source'],
+        coords={'year':bio_group['year'], 'group':bio_group['group'], 'source':score_sources}
+    )
+
+
+    def get_val(sel_year, sel_group):
+
+        arr = bio_group.sel(group=sel_group).interp(year=sel_year, method='linear').compute()
+        # Reproject the data to match NLUM
+        arr = arr.rio.set_crs(NLUM.rio.crs)
+        arr = arr.rio.reproject_match(NLUM, resample=rasterio.enums.Resampling.bilinear) 
+        # Multiply by the real area (ha) to get the biodiversity suitability score (i.e., area weighted suitability)
+        arr = (arr * real_area_ha_2D).astype('float32')
+        
+        if sel_year == 1990:
+            # Sum of biodiversity suitability score without degradation
+            all_sum = arr.sum(['y', 'x']).values
+            # Biodiversity suitability score with degradation
+            arr = arr * biodiv_degrade_ly_2D
+            in_sum = arr.where(idx_in_LUTO_natural_2D).sum(['y', 'x']).values
+            out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
+        else:
+            all_sum = np.nan
+            in_sum = np.nan
+            out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
+        return sel_year, sel_group, all_sum, in_sum, out_sum
+    
+    tasks = [
+        delayed(get_val)(yr, sp) 
+        for sp in bio_group['group'].values
+        for yr in bio_group['year'].values
+    ]
+    
+    for yr, sp, val_sum, val_in, val_out in tqdm(Parallel(n_jobs=5, return_as='generator')(tasks), total=len(tasks)):
+        bio_group_sum.loc[yr, sp] = [val_sum, val_in, val_out]
+        
+        
+    bio_group_sum.to_dataframe('BIO_SUITABILITY_AREA_WEIGHTED_SCORE_HA').reset_index().to_csv(f'{bio_Carla_NetCDF_dir}/{fname}.csv', index=False)
+    
+    
+    
+# Get the biodiversity target
+'''
+The habitat suitability baselines are same for all SSPs, so here use SSP245 to calculate the baseline
+'''
+bio_score_baseline = pd.read_csv(f'{bio_Carla_NetCDF_dir}/bio_ssp245_EnviroSuit_group_Score.csv').query('year == 1990')
+bio_score_baseline = bio_score_baseline.pivot(index=['group'], columns='source', values='BIO_SUITABILITY_AREA_WEIGHTED_SCORE_HA').reset_index()
+bio_score_baseline['HABITAT_SUITABILITY_BASELINE'] = bio_score_baseline.eval('(`in` + `out`) / `all`') * 100
+
+# Create a habitat suitability target csv file
+bio_target = bio_score_baseline[['group', 'HABITAT_SUITABILITY_BASELINE','all','out']].copy()
+bio_target = bio_target.rename(columns={
+    'all': 'HABITAT_SUITABILITY_BASELINE_SCORE_ALL_AUSTRALIA',
+    'out': 'HABITAT_SUITABILITY_BASELINE_SCORE_OUTSIDE_LUTO',
+    'HABITAT_SUITABILITY_BASELINE': 'HABITAT_SUITABILITY_BASELINE_PERCENT'
+})
+
+bio_target.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_TARGET_GROUP.csv', index=False)
+    
+    
+# Get the biodiversity suitability area weighted scores for each SSP
+bio_scores = pd.DataFrame()
+
+for f in glob(f'{bio_Carla_NetCDF_dir}/*group_Score.csv'):
+    ssp = re.compile(r'bio_ssp(\d*)_').findall(f)[0]
+    bio_out = pd.read_csv(f).query('year != 1990').query('source == "out"').drop(columns=['source']).set_index(['group', 'year'])
+    bio_out = bio_out.rename(columns={'BIO_SUITABILITY_AREA_WEIGHTED_SCORE_HA': f'OUTSIDE_LUTO_NATURAL_SUITABILITY_AREA_WEIGHTED_HA_SSP{ssp}'})
+    bio_scores = pd.concat([bio_scores, bio_out], axis=1)
+
+bio_scores = bio_scores.reset_index()
+bio_scores.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_SCORES_GROUP.csv', index=False)
 
 
 
