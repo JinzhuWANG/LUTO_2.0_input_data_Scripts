@@ -955,30 +955,24 @@ for gdb_path, layer_raster, layer_attribute in files:
     # Reorder the groups lexicographically
     dst_array_xr = dst_array_xr.sortby('group')
     
-    # Optioin-1: Use the index of the largest group value to represent the cell
-    dst_array_xr_argmax = dst_array_xr.argmax(dim='group')     
-    dst_array_xr_argmax_area_ha = np.bincount(dst_array_xr_argmax.values, weights=NLUM_area_mask, minlength=dst_array_xr_argmax.max().values+1)
-    dst_array_xr_argmax_area_ha = pd.DataFrame({'group':dst_array_xr.coords['group'], 'AREA_HA':dst_array_xr_argmax_area_ha})
-    
-    # Option-2: Split each group as a separate layer, which is the percentage [0-100] of the group in each cell
-    dst_array_xr_area_ha = dst_array_xr * NLUM_area_mask[None,:]
-    dst_array_xr_group_area_ha = dst_array_xr_area_ha.sum(dim='cell').compute().to_dataframe(name='AREA_HA').reset_index()
-    
     # Save xarray DataArray to NetCDF
     encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}}
     output_layer_name = layer_raster.replace('_ALB', '')
     
-    save_path = f'{os.path.dirname(gdb_path)}/{output_layer_name}_LOW_SPATIAL_DETAIL.nc'
-    dst_array_xr_argmax.name = 'data'
-    dst_array_xr_argmax.to_netcdf(save_path, encoding=encoding, engine='h5netcdf')
-    
+    # Option-1: use each separate group layer, which is the percentage [0-100], to represent the cell
     save_path = f'{os.path.dirname(gdb_path)}/{output_layer_name}_HIGH_SPATIAL_DETAIL.nc'
     dst_array_xr.name = 'data'
     dst_array_xr.to_netcdf(save_path, encoding=encoding, engine='h5netcdf')
     
- 
-
-
+    # Optioin-2: Use the index of the largest group value to represent the cell
+    dst_array_xr_argmax = dst_array_xr.argmax(dim='group')     
+    
+    save_path = f'{os.path.dirname(gdb_path)}/{output_layer_name}_LOW_SPATIAL_DETAIL.nc'
+    dst_array_xr_argmax.name = 'data'
+    dst_array_xr_argmax.to_netcdf(save_path, encoding=encoding, engine='h5netcdf')
+  
+  
+  
 
 
 # --------------- Get the sum of areas (ha) for pre-1750 ---------------
@@ -994,7 +988,7 @@ NVIS_pre_mvg_names = NVIS_pre_mvg_xr_high_spatial_detail.coords['group'].values.
 NVIS_pre_mvs_names = NVIS_pre_mvs_xr_high_spatial_detail.coords['group'].values.tolist()
 
 
-# --------------- Total vegataion area (ha) pre-1750 ---------------
+# ================================== Total vegataion area (ha) pre-1750 ==================================
 
 # ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
 NVIS_pre_mvg_total_ha_low_spatial_detail = np.bincount(
@@ -1009,8 +1003,8 @@ NVIS_pre_mvs_total_ha_low_spatial_detail = np.bincount(
     minlength = NVIS_pre_mvs_xr_low_spatial_detail.max().values + 1
 )
 
-NVIS_pre_mvg_total_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvg_names, 'TOTAL_AREA_HA': NVIS_pre_mvg_total_ha_low_spatial_detail})
-NVIS_pre_mvs_total_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvs_names, 'TOTAL_AREA_HA': NVIS_pre_mvs_total_ha_low_spatial_detail})
+NVIS_pre_mvg_total_ha_low_spatial_detail_df = pd.DataFrame({'group':NVIS_pre_mvg_names, 'AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA': NVIS_pre_mvg_total_ha_low_spatial_detail})
+NVIS_pre_mvs_total_ha_low_spatial_detail_df = pd.DataFrame({'group':NVIS_pre_mvs_names, 'AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA': NVIS_pre_mvs_total_ha_low_spatial_detail})
 
 
 
@@ -1018,14 +1012,14 @@ NVIS_pre_mvs_total_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvs
 # ------------- NVIS_SPATIAL_DETAIL == 'HIGH' -------------
 NVIS_pre_mvg_total_ha_high_spatial_detail = NVIS_pre_mvg_xr_high_spatial_detail * zones['CELL_HA'].values[None, :]
 NVIS_pre_mvs_total_ha_high_spatial_detail = NVIS_pre_mvs_xr_high_spatial_detail * zones['CELL_HA'].values[None, :]
-NVIS_pre_mvg_total_ha_df_high_spatial_detail = NVIS_pre_mvg_total_ha_high_spatial_detail.sum(dim='cell').to_dataframe('TOTAL_AREA_HA').reset_index()
-NVIS_pre_mvs_total_ha_df_high_spatial_detail = NVIS_pre_mvs_total_ha_high_spatial_detail.sum(dim='cell').to_dataframe('TOTAL_AREA_HA').reset_index()
+NVIS_pre_mvg_total_ha_high_spatial_detail_df = NVIS_pre_mvg_total_ha_high_spatial_detail.sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA').reset_index()
+NVIS_pre_mvs_total_ha_high_spatial_detail_df = NVIS_pre_mvs_total_ha_high_spatial_detail.sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA').reset_index()
 
 
 
 
 
-# --------------- Vegataion area outside the LUTO study area ---------------
+# ================================== Vegataion area outside the LUTO study area ==================================
 
 # ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
 NVIS_pre_mvg_outside_ha_low_spatial_detail = np.bincount(
@@ -1041,65 +1035,106 @@ NVIS_pre_mvs_outside_ha_low_spatial_detail = np.bincount(
     minlength = NVIS_pre_mvs_xr_low_spatial_detail.max().values + 1
 )
 
-NVIS_pre_mvg_outside_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvg_names,'OUTSIDE_LUTO_AREA_HA': NVIS_pre_mvg_outside_ha_low_spatial_detail})
-NVIS_pre_mvs_outside_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvs_names,'OUTSIDE_LUTO_AREA_HA': NVIS_pre_mvs_outside_ha_low_spatial_detail})
+NVIS_pre_mvg_outside_ha_low_spatial_detail_df = pd.DataFrame({'group':NVIS_pre_mvg_names,'AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA': NVIS_pre_mvg_outside_ha_low_spatial_detail})
+NVIS_pre_mvs_outside_ha_low_spatial_detail_df = pd.DataFrame({'group':NVIS_pre_mvs_names,'AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA': NVIS_pre_mvs_outside_ha_low_spatial_detail})
 
 
 # ------------- NVIS_SPATIAL_DETAIL == 'HIGH' -------------
 
 NVIS_pre_mvg_outside_ha_high_spatial_detail = NVIS_pre_mvg_xr_high_spatial_detail.sel(cell=idx_out_LUTO_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_natural]     
 NVIS_pre_mvs_outside_ha_high_spatial_detail = NVIS_pre_mvs_xr_high_spatial_detail.sel(cell=idx_out_LUTO_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_natural]     
-NVIS_pre_mvg_outside_ha_df_high_spatial_detail = NVIS_pre_mvg_outside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('OUTSIDE_LUTO_AREA_HA').reset_index()
-NVIS_pre_mvs_outside_ha_df_high_spatial_detail = NVIS_pre_mvs_outside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('OUTSIDE_LUTO_AREA_HA').reset_index()
+NVIS_pre_mvg_outside_ha_high_spatial_detail_df = NVIS_pre_mvg_outside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA').reset_index()
+NVIS_pre_mvs_outside_ha_high_spatial_detail_df = NVIS_pre_mvs_outside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA').reset_index()
 
 
 
 
 
-# --------------- Vegataion area inside the LUTO study area ---------------
+# ================================== Vegataion area inside the LUTO study area ==================================
 
 # ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
 
 NVIS_pre_mvg_inside_ha_low_spatial_detail = np.bincount(
     NVIS_pre_mvg_xr_low_spatial_detail.sel(cell=idx_in_LUTO_natural).values, 
-    weights = zones['CELL_HA'].values[idx_in_LUTO_natural],
+    weights = zones['CELL_HA'].values[idx_in_LUTO_natural] * biodiv_degrade_ly[idx_in_LUTO_natural],
     minlength = NVIS_pre_mvg_xr_low_spatial_detail.max().values + 1
 )
 
 NVIS_pre_mvs_inside_ha_low_spatial_detail = np.bincount(
     NVIS_pre_mvs_xr_low_spatial_detail.sel(cell=idx_in_LUTO_natural).values,
-    weights = zones['CELL_HA'].values[idx_in_LUTO_natural],
+    weights = zones['CELL_HA'].values[idx_in_LUTO_natural] * biodiv_degrade_ly[idx_in_LUTO_natural],
     minlength = NVIS_pre_mvs_xr_low_spatial_detail.max().values + 1
 )
 
-NVIS_pre_mvg_inside_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvg_names,'INSIDE_LUTO_AREA_HA': NVIS_pre_mvg_inside_ha_low_spatial_detail})
-NVIS_pre_mvs_inside_ha_df_low_spatial_detail = pd.DataFrame({'group':NVIS_pre_mvs_names,'INSIDE_LUTO_AREA_HA': NVIS_pre_mvs_inside_ha_low_spatial_detail})
+NVIS_pre_mvg_inside_ha_low_spatial_detail_df = pd.DataFrame({'group':NVIS_pre_mvg_names,'AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_NATURAL_HA': NVIS_pre_mvg_inside_ha_low_spatial_detail})
+NVIS_pre_mvs_inside_ha_low_spatial_detail_df = pd.DataFrame({'group':NVIS_pre_mvs_names,'AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_NATURAL_HA': NVIS_pre_mvs_inside_ha_low_spatial_detail})
 
 
 # ------------- NVIS_SPATIAL_DETAIL == 'HIGH' -------------
-NVIS_pre_mvg_inside_ha_high_spatial_detail = NVIS_pre_mvg_xr_high_spatial_detail.sel(cell=idx_in_LUTO_natural) * zones['CELL_HA'].values[None, idx_in_LUTO_natural]
-NVIS_pre_mvs_inside_ha_high_spatial_detail = NVIS_pre_mvs_xr_high_spatial_detail.sel(cell=idx_in_LUTO_natural) * zones['CELL_HA'].values[None, idx_in_LUTO_natural]
-NVIS_pre_mvg_inside_ha_df_high_spatial_detail = NVIS_pre_mvg_inside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('INSIDE_LUTO_AREA_HA').reset_index()
-NVIS_pre_mvs_inside_ha_df_high_spatial_detail = NVIS_pre_mvs_inside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('INSIDE_LUTO_AREA_HA').reset_index()
+NVIS_pre_mvg_inside_ha_high_spatial_detail = NVIS_pre_mvg_xr_high_spatial_detail.sel(cell=idx_in_LUTO_natural) * zones['CELL_HA'].values[None, idx_in_LUTO_natural] * biodiv_degrade_ly[idx_in_LUTO_natural]
+NVIS_pre_mvs_inside_ha_high_spatial_detail = NVIS_pre_mvs_xr_high_spatial_detail.sel(cell=idx_in_LUTO_natural) * zones['CELL_HA'].values[None, idx_in_LUTO_natural] * biodiv_degrade_ly[idx_in_LUTO_natural]
+NVIS_pre_mvg_inside_ha_high_spatial_detail_df = NVIS_pre_mvg_inside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_NATURAL_HA').reset_index()
+NVIS_pre_mvs_inside_ha_high_spatial_detail_df = NVIS_pre_mvs_inside_ha_high_spatial_detail.sum(dim='cell').to_dataframe('AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_NATURAL_HA').reset_index()
 
 
 
 
 
-# ------------- Combine 'HIGH' and 'LOW' -------------
+# ================================== Combine 'HIGH' and 'LOW' ==================================
 
 # Concatenate the two dataframes
-NVIS_pre_mvg_low_spatial_detail = NVIS_pre_mvg_total_ha_df_low_spatial_detail.merge(NVIS_pre_mvg_outside_ha_df_low_spatial_detail, on='group')
-NVIS_pre_mvg_high_spatial_detail = NVIS_pre_mvg_total_ha_df_high_spatial_detail.merge(NVIS_pre_mvg_outside_ha_df_high_spatial_detail, on='group')
+NVIS_pre_mvg_low_spatial_detail = NVIS_pre_mvg_total_ha_low_spatial_detail_df.merge(
+    NVIS_pre_mvg_outside_ha_low_spatial_detail_df, on='group').merge(
+    NVIS_pre_mvg_inside_ha_low_spatial_detail_df, on='group')
+    
+NVIS_pre_mvg_high_spatial_detail = NVIS_pre_mvg_total_ha_high_spatial_detail_df.merge(
+    NVIS_pre_mvg_outside_ha_high_spatial_detail_df, on='group').merge(
+    NVIS_pre_mvg_inside_ha_high_spatial_detail_df, on='group')
 
-NVIS_pre_mvs_low_spatial_detail = NVIS_pre_mvs_total_ha_df_low_spatial_detail.merge(NVIS_pre_mvs_outside_ha_df_low_spatial_detail, on='group')
-NVIS_pre_mvs_high_spatial_detail = NVIS_pre_mvs_total_ha_df_high_spatial_detail.merge(NVIS_pre_mvs_outside_ha_df_high_spatial_detail, on='group')
+NVIS_pre_mvs_low_spatial_detail = NVIS_pre_mvs_total_ha_low_spatial_detail_df.merge(
+    NVIS_pre_mvs_outside_ha_low_spatial_detail_df, on='group').merge(
+    NVIS_pre_mvs_inside_ha_low_spatial_detail_df, on='group')
+    
+NVIS_pre_mvs_high_spatial_detail = NVIS_pre_mvs_total_ha_high_spatial_detail_df.merge(
+    NVIS_pre_mvs_outside_ha_high_spatial_detail_df, on='group').merge(
+    NVIS_pre_mvs_inside_ha_high_spatial_detail_df, on='group')
+
+
+# Calculate the percentage of base-year biodiversity socre to pre-1750 level of the base year
+NVIS_pre_mvg_low_spatial_detail.insert(0, 'BASE_YR_PERCENT', NVIS_pre_mvg_low_spatial_detail.eval(
+    '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_NATURAL_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
+    / AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA * 100'))
+
+NVIS_pre_mvg_high_spatial_detail.insert(0, 'BASE_YR_PERCENT', NVIS_pre_mvg_high_spatial_detail.eval(
+    '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_NATURAL_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
+    / AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA * 100'))
+
+NVIS_pre_mvs_low_spatial_detail.insert(0, 'BASE_YR_PERCENT', NVIS_pre_mvs_low_spatial_detail.eval(
+    '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_NATURAL_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
+    / AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA * 100'))
+
+NVIS_pre_mvs_high_spatial_detail.insert(0, 'BASE_YR_PERCENT', NVIS_pre_mvs_high_spatial_detail.eval(
+    '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_NATURAL_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
+    / AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA * 100'))
+
 
 # Append a user-defined target column
-NVIS_pre_mvg_low_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
-NVIS_pre_mvg_high_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
-NVIS_pre_mvs_low_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
-NVIS_pre_mvs_high_spatial_detail['CONSERVATION_TARGET_PCT'] = 30
+NVIS_pre_mvg_low_spatial_detail.insert(1, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
+NVIS_pre_mvg_low_spatial_detail.insert(1, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
+NVIS_pre_mvg_low_spatial_detail.insert(1, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
+
+NVIS_pre_mvg_high_spatial_detail.insert(1, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
+NVIS_pre_mvg_high_spatial_detail.insert(1, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
+NVIS_pre_mvg_high_spatial_detail.insert(1, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
+
+NVIS_pre_mvs_low_spatial_detail.insert(1, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
+NVIS_pre_mvs_low_spatial_detail.insert(1, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
+NVIS_pre_mvs_low_spatial_detail.insert(1, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
+
+NVIS_pre_mvs_high_spatial_detail.insert(1, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
+NVIS_pre_mvs_high_spatial_detail.insert(1, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
+NVIS_pre_mvs_high_spatial_detail.insert(1, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
+
 
 # Save to CSV
 NVIS_pre_mvg_low_spatial_detail.to_csv(NVIS_PRE_1750_path + '/NVIS_MVG_LOW_SPATIAL_DETAIL.csv', index=False)
@@ -1107,54 +1142,3 @@ NVIS_pre_mvg_high_spatial_detail.to_csv(NVIS_PRE_1750_path + '/NVIS_MVG_HIGH_SPA
 NVIS_pre_mvs_low_spatial_detail.to_csv(NVIS_PRE_1750_path + '/NVIS_MVS_LOW_SPATIAL_DETAIL.csv', index=False)
 NVIS_pre_mvs_high_spatial_detail.to_csv(NVIS_PRE_1750_path + '/NVIS_MVS_HIGH_SPATIAL_DETAIL.csv', index=False)
 
-
-
-
-# ------------------------- TMP -------------------------
-
-save_path = 'N:/LUF-Modelling/LUTO2_JZ/TEMP/vegetation_pre_calc_area_ha'
-
-# ------------- NVIS_SPATIAL_DETAIL == 'LOW' -------------
-
-NVIS_pre_mvg_low_spatial_detail_area_ha = pd.concat([
-    NVIS_pre_mvg_total_ha_df_low_spatial_detail.set_index('group'), 
-    NVIS_pre_mvg_outside_ha_df_low_spatial_detail.set_index('group'),
-    NVIS_pre_mvg_inside_ha_df_low_spatial_detail.set_index('group')], axis=1).reset_index()
-
-NVIS_pre_mvg_low_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_AREA_HA'] = NVIS_pre_mvg_low_spatial_detail_area_ha.eval('OUTSIDE_LUTO_AREA_HA	+ INSIDE_LUTO_AREA_HA')
-NVIS_pre_mvg_low_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_to_TOTAL'] = NVIS_pre_mvg_low_spatial_detail_area_ha.eval('INSIDE_OUTSIDE_SUM_AREA_HA / TOTAL_AREA_HA')
-NVIS_pre_mvg_low_spatial_detail_area_ha.to_csv(f'{save_path}/NVIS_pre_mvg_low_spatial_detail_area_ha.csv', index=False)
-
-NVIS_pre_mvg_high_spatial_detail_area_ha = pd.concat([
-    NVIS_pre_mvg_total_ha_df_high_spatial_detail.set_index('group'), 
-    NVIS_pre_mvg_outside_ha_df_high_spatial_detail.set_index('group'),
-    NVIS_pre_mvg_inside_ha_df_high_spatial_detail.set_index('group')], axis=1).reset_index()
-
-NVIS_pre_mvg_high_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_AREA_HA'] = NVIS_pre_mvg_high_spatial_detail_area_ha.eval('OUTSIDE_LUTO_AREA_HA	+ INSIDE_LUTO_AREA_HA')
-NVIS_pre_mvg_high_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_to_TOTAL'] = NVIS_pre_mvg_high_spatial_detail_area_ha.eval('INSIDE_OUTSIDE_SUM_AREA_HA / TOTAL_AREA_HA')
-NVIS_pre_mvg_high_spatial_detail_area_ha.to_csv(f'{save_path}//NVIS_pre_mvg_high_spatial_detail_area_ha.csv', index=False)
-
-
-
-# ------------- NVIS_SPATIAL_DETAIL == 'HIGH' -------------
-
-NVIS_pre_mvs_low_spatial_detail_area_ha = pd.concat([
-    NVIS_pre_mvs_total_ha_df_low_spatial_detail.set_index('group'), 
-    NVIS_pre_mvs_outside_ha_df_low_spatial_detail.set_index('group'),
-    NVIS_pre_mvs_inside_ha_df_low_spatial_detail.set_index('group')], axis=1).reset_index()
-
-NVIS_pre_mvs_low_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_AREA_HA'] = NVIS_pre_mvs_low_spatial_detail_area_ha.eval('OUTSIDE_LUTO_AREA_HA	+ INSIDE_LUTO_AREA_HA')
-NVIS_pre_mvs_low_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_to_TOTAL'] = NVIS_pre_mvs_low_spatial_detail_area_ha.eval('INSIDE_OUTSIDE_SUM_AREA_HA / TOTAL_AREA_HA')
-NVIS_pre_mvs_low_spatial_detail_area_ha.to_csv(f'{save_path}//NVIS_pre_mvs_low_spatial_detail_area_ha.csv', index=False)
-
-
-NVIS_pre_mvs_high_spatial_detail_area_ha = pd.concat([
-    NVIS_pre_mvs_total_ha_df_high_spatial_detail.set_index('group'), 
-    NVIS_pre_mvs_outside_ha_df_high_spatial_detail.set_index('group'),
-    NVIS_pre_mvs_inside_ha_df_high_spatial_detail.set_index('group')], axis=1).reset_index()
-
-NVIS_pre_mvs_high_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_AREA_HA'] = NVIS_pre_mvs_high_spatial_detail_area_ha.eval('OUTSIDE_LUTO_AREA_HA	+ INSIDE_LUTO_AREA_HA')
-NVIS_pre_mvs_high_spatial_detail_area_ha['INSIDE_OUTSIDE_SUM_to_TOTAL'] = NVIS_pre_mvs_high_spatial_detail_area_ha.eval('INSIDE_OUTSIDE_SUM_AREA_HA / TOTAL_AREA_HA')
-NVIS_pre_mvs_high_spatial_detail_area_ha.to_csv(f'{save_path}/NVIS_pre_mvs_high_spatial_detail_area_ha.csv', index=False)
-
-# --------------------------  TMP END --------------------------
