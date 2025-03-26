@@ -1,10 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-import geopandas as gpd
 import numpy as np
-from scipy import ndimage as nd
 import rasterio, matplotlib
-from rasterio import features
 from rasterio.fill import fillnodata
 from rasterio.warp import reproject
 from rasterio.enums import Resampling

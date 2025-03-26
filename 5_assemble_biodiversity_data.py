@@ -18,7 +18,11 @@ from affine import Affine
 
 
 
-# Global variables
+
+###############################################################################################
+#                                  Global variables                                           #
+###############################################################################################
+
 NLUM = rxr.open_rasterio('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif').squeeze('band').drop_vars('band').astype('uint8') 
 NLUM_zero = NLUM.copy() * 0
 
@@ -793,7 +797,7 @@ SNES_arr = xr.DataArray(
 # Parallel processing to put the data into the empty array
 def get_arr(row):
     ds = rxr.open_rasterio(row['TIF_PATH']).sel(band=1).drop_vars('band')
-    ds = xr.where(ds.isin([1, 2]), 1, 0).astype(np.bool_)      # 1 is 'MAYBE', 2 is 'LIKELY'.
+    ds = xr.where(ds.isin([1, 2]), 1, 0).astype(np.bool_)                       # 1 is 'MAYBE', 2 is 'LIKELY'.
     ds = ds.values[np.nonzero(NLUM.values)]
     return row['SCIENTIFIC_NAME'], row['PRESENCE_RANK'], ds
 
@@ -803,7 +807,7 @@ for species,rank,arr in tqdm(Parallel(n_jobs=20, return_as='generator')(tasks), 
     SNES_arr.loc[species, rank] = arr
     
 # Sum the 'LIKELY' and 'MAYBE' layers to get the full species distribution
-SNES_arr_LIKELY_MAYBE_sum = SNES_arr.sum('presence').astype(np.bool_)        # 0 is 'NOT PRESENT', 1 is 'MAYBE AND LIKELY'
+SNES_arr_LIKELY_MAYBE_sum = SNES_arr.sum('presence').astype(np.bool_)           # 0 is 'NOT PRESENT', 1 is 'MAYBE AND LIKELY'
 SNES_arr.loc[dict(presence=1)] = SNES_arr_LIKELY_MAYBE_sum.values
 SNES_arr.coords['presence'] = ['LIKELY', 'LIKELY_AND_MAYBE']
 
@@ -865,10 +869,6 @@ SNES_df['HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL'] = SNES_df['NATURAL_OUT
 SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = SNES_df['NATURAL_IN_LUTO_HA'] + SNES_df['NATURAL_OUT_LUTO_HA']
 SNES_df['HABITAT_SIGNIFICANCE_BASELINE_PERCENT'] = SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] / SNES_df['ALL_HA'] * 100
 
-# Fill the missing SCIENTIFIC_NAME and PRESENCE_RANK with nan
-re_index = pd.MultiIndex.from_product([SNES_df['SCIENTIFIC_NAME'].unique(), SNES_df['PRESENCE_RANK'].unique()], names=['SCIENTIFIC_NAME', 'PRESENCE_RANK'])
-SNES_df = SNES_df.set_index(['SCIENTIFIC_NAME', 'PRESENCE_RANK']).reindex(re_index).reset_index()
-
 # Drop unneeded columns, and split the data into three dataframes based on the PRESENCE_RANK
 SNES_df = SNES_df.drop(columns=['ALL_HA', 'NATURAL_IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA'])
 SNES_df_LIKELY = SNES_df.query('PRESENCE_RANK == "LIKELY"').copy().drop(columns=['PRESENCE_RANK'])
@@ -876,7 +876,7 @@ SNES_df_LIKELY_MAYBE = SNES_df.query('PRESENCE_RANK == "LIKELY_AND_MAYBE"').copy
 
 # Append suffix to the columns for the LIKELY and MAYBE dataframes
 SNES_df_LIKELY.columns = [f'{col}_LIKELY' if col != 'SCIENTIFIC_NAME' else 'SCIENTIFIC_NAME' for col in SNES_df_LIKELY.columns]
-SNES_df_LIKELY_MAYBE.columns = [f'{col}_MAYBE' if col != 'SCIENTIFIC_NAME' else 'SCIENTIFIC_NAME' for col in SNES_df_LIKELY_MAYBE.columns]
+SNES_df_LIKELY_MAYBE.columns = [f'{col}_LIKELY_MAYBE' if col != 'SCIENTIFIC_NAME' else 'SCIENTIFIC_NAME' for col in SNES_df_LIKELY_MAYBE.columns]
 
 # Add user defined columns to the LIKELY and MAYBE dataframes
 SNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2100_LIKELY', np.nan)
@@ -900,15 +900,15 @@ cols = ['SCIENTIFIC_NAME','VERNACULAR_NAME',
         'USER_DEFINED_TARGET_PERCENT_2050_LIKELY',
         'USER_DEFINED_TARGET_PERCENT_2100_LIKELY',
          
-        'HABITAT_SIGNIFICANCE_BASELINE_PERCENT_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_PERCENT_LIKELY_MAYBE',
         'USER_DEFINED_TARGET_PERCENT_2030_LIKELY_MAYBE',
         'USER_DEFINED_TARGET_PERCENT_2050_LIKELY_MAYBE',
         'USER_DEFINED_TARGET_PERCENT_2100_LIKELY_MAYBE',
         
         'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY',
         'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY',
-        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_MAYBE',
-        'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY_MAYBE',
 
         'LISTED_TAXON_ID','MAP_TAXON_ID', 'THREATENED_STATUS',
         'MIGRATORY_STATUS', 'MARINE', 'CETACEAN', 'EXTRACT_DATE', 'TAXON_GROUP',
@@ -917,7 +917,7 @@ cols = ['SCIENTIFIC_NAME','VERNACULAR_NAME',
         'SPRAT_PROFILE']
 
 SNES_df = SNES_df[cols]
-SNES_df.to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_SNES_target.csv', index=False)
+SNES_df.to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_SNES_target1.csv', index=False)
 
 
 
@@ -1014,11 +1014,11 @@ ECNES_df = ECNES_df.set_index(['COMMUNITY', 'PRES_RANK']).reindex(re_index).rese
 # Drop unneeded columns, and split the data into three dataframes based on the PRES_RANK
 ECNES_df = ECNES_df.drop(columns=['ALL_HA', 'NATURAL_IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA'])
 ECNES_df_LIKELY = ECNES_df.query('PRES_RANK == "LIKELY"').copy().drop(columns=['PRES_RANK'])
-ECNES_df_LIKELY_MAYBE = ECNES_df.query('PRES_RANK == "LIKELY_MAYBE"').copy().drop(columns=['PRES_RANK'])
+ECNES_df_LIKELY_MAYBE = ECNES_df.query('PRES_RANK == "LIKELY_AND_MAYBE"').copy().drop(columns=['PRES_RANK'])
 
 # Append suffix to the columns for the LIKELY and MAYBE dataframes
 ECNES_df_LIKELY.columns = [f'{col}_LIKELY' if col != 'COMMUNITY' else 'COMMUNITY' for col in ECNES_df_LIKELY.columns]
-ECNES_df_LIKELY_MAYBE.columns = [f'{col}_MAYBE' if col != 'COMMUNITY' else 'COMMUNITY' for col in ECNES_df_LIKELY_MAYBE.columns]
+ECNES_df_LIKELY_MAYBE.columns = [f'{col}_LIKELY_MAYBE' if col != 'COMMUNITY' else 'COMMUNITY' for col in ECNES_df_LIKELY_MAYBE.columns]
 
 # Add user defined columns to the LIKELY and MAYBE dataframes
 ECNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2100_LIKELY', np.nan)
@@ -1041,15 +1041,15 @@ cols = ['COMMUNITY',
         'USER_DEFINED_TARGET_PERCENT_2050_LIKELY',
         'USER_DEFINED_TARGET_PERCENT_2100_LIKELY',
          
-        'HABITAT_SIGNIFICANCE_BASELINE_PERCENT_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_PERCENT_LIKELY_MAYBE',
         'USER_DEFINED_TARGET_PERCENT_2030_LIKELY_MAYBE',
         'USER_DEFINED_TARGET_PERCENT_2050_LIKELY_MAYBE',
         'USER_DEFINED_TARGET_PERCENT_2100_LIKELY_MAYBE',
         
         'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY',
         'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY',
-        'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_MAYBE',
-        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY_MAYBE',
         
         'CATEGORY', 'COM_ID','EPBC', 'EXTRACTED', 'CELL_SIZE', 'REGIONS', 'CITATION', 'SPRAT']
 
