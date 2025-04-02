@@ -61,7 +61,7 @@ idx_out_LUTO_natural = idx_out_LUTO & natural_cells                             
 biodiv_degrade_lookup = pd.read_csv(HCAS_condition).set_index(['lu'])['PERCENTILE_50'].to_dict()
 biodiv_degrade_lookup = {k:v*(1/biodiv_degrade_lookup[Unalloc_nat_code]) for k,v in biodiv_degrade_lookup.items()}
 biodiv_degrade_lookup[-1] = 0  
-biodiv_degrade_ly = np.vectorize(biodiv_degrade_lookup.get, otypes=[float])(lumap['LU_ID_LUTO'].values).astype(np.float32)
+biodiv_degrade_ly = np.vectorize(biodiv_degrade_lookup.get, otypes=[np.float32])(lumap['LU_ID_LUTO'].values).astype(np.float32)
 biodiv_degrade_ly[idx_out_LUTO_natural] = 1.0
 
 biodiv_degrade_ly_2D = NLUM_zero.copy().astype(np.float32)
@@ -69,8 +69,8 @@ np.place(biodiv_degrade_ly_2D.values, NLUM.values, biodiv_degrade_ly)
 
 
 # Get the 2D layers that are in natural state, inside/outside the LUTO study area
-idx_in_LUTO_natural_2D = NLUM_zero.copy()
-np.place(idx_in_LUTO_natural_2D.values, NLUM.values, idx_in_LUTO_natural.astype('uint8'))
+idx_in_LUTO_2D = NLUM_zero.copy()
+np.place(idx_in_LUTO_2D.values, NLUM.values, idx_in_LUTO.astype('uint8'))
 idx_out_LUTO_natural_2D = NLUM_zero.copy()
 np.place(idx_out_LUTO_natural_2D.values, NLUM.values, idx_out_LUTO_natural.astype('uint8'))
 
@@ -81,13 +81,6 @@ np.place(idx_out_LUTO_natural_2D.values, NLUM.values, idx_out_LUTO_natural.astyp
 ###############################################################################################
 
 SSPs = ['ssp126', 'ssp245', 'ssp370', 'ssp585']
-
-# Empty array to store the conservation priority data
-GBF2_conserve_priority_lys = xr.DataArray(
-    np.zeros((len(SSPs), NLUM.sum().values), dtype='float32'),
-    dims=['ssp', 'cell'],
-    coords={'ssp':SSPs, 'cell':zones.index}
-)
 
 # Empty list to store the conservation priority performance data
 GBF2_conserve_performance = pd.DataFrame()
@@ -113,7 +106,7 @@ for ssp in SSPs:
         ).reset_index(
         ).sort_values('PRIORITY_RANK', ascending=False
         ).assign(
-            AREA_COVERAGE_PERCENT=lambda df: df['area'].astype("float").cumsum() / df['area'].sum() * 100,
+            AREA_COVERAGE_PERCENT=lambda df: df['area'].astype("float").cumsum() / df['area'].sum() * 100,              # Needs to convert cumsum to float to avoid numerical issues
             PRIORITY_RANK_CUMSUM_CONTRIBUTION=lambda df: (df['PRIORITY_RANK'].astype("float") * df['area']).cumsum() / (df['PRIORITY_RANK'] * df['area']).sum() * 100,
             ssp=ssp
         ).drop(columns=['area', 'cell'])
@@ -123,15 +116,10 @@ for ssp in SSPs:
     ly_stats['AREA_COVERAGE_PERCENT'] = np.arange(101)
     
     # Save the conservation priority data to the array
-    GBF2_conserve_priority_lys.loc[ssp] = xr.where((ly == -np.inf), 0, ly)
     GBF2_conserve_performance = pd.concat([GBF2_conserve_performance, ly_stats])
 
 
-# Save xr to nc, csv to Excel
-encoding={'data': {"compression": "gzip", "compression_opts": 9, "dtype": 'float32'}}
-GBF2_conserve_priority_lys.name = 'data'
-GBF2_conserve_priority_lys.to_netcdf(f'{bio_Carla_NetCDF_dir}/GBF2_conserve_priority.nc', mode='w', encoding=encoding, engine='h5netcdf')
-
+# Save csv to Excel
 with pd.ExcelWriter(f'{bio_Carla_NetCDF_dir}/GBF2_conserve_performance.xlsx') as writer:
     for ssp, df in GBF2_conserve_performance.groupby('ssp'):
         df = df[['AREA_COVERAGE_PERCENT', 'PRIORITY_RANK', 'PRIORITY_RANK_CUMSUM_CONTRIBUTION']]
@@ -227,7 +215,8 @@ bio_coord_x = xr.DataArray(bio_arr['x'].values, dims=['x'])
 bio_coord_y = xr.DataArray(bio_arr['y'].values, dims=['y'])
 
 # Calculate the real area for each bio cell in hectares
-results = ({'properties': {'cell_bio': v}, 'geometry': s} for i, (s, v) in enumerate(features.shapes(bio_arr.values, mask = None, transform = bio_arr.rio.transform())))
+results = ({'properties': {'cell_bio': v}, 'geometry': s} 
+           for i, (s, v) in enumerate(features.shapes(bio_arr.values, mask = None, transform = bio_arr.rio.transform())))
 rnd_gdf = gpd.GeoDataFrame.from_features(list(results), crs = NLUM.rio.crs)
 rnd_gdf = rnd_gdf.to_crs('EPSG:3577')
 rnd_gdf['CELL_HA'] = rnd_gdf['geometry'].area / 10000
@@ -236,13 +225,13 @@ bio_arr_area_ha.values = rnd_gdf['CELL_HA'].values.reshape(bio_arr.sizes['y'], b
 
 
 # Convert the index to xarray; 1D with cell as the primary dimension, and y, x as the coordinates
-idx_in_LUTO_natural_2D = NLUM_zero.copy()
-np.place(idx_in_LUTO_natural_2D.values, NLUM.values, idx_in_LUTO_natural.astype('uint8'))
+idx_in_LUTO_2D = NLUM_zero.copy()
+np.place(idx_in_LUTO_2D.values, NLUM.values, idx_in_LUTO_natural.astype('uint8'))
 idx_out_LUTO_natural_2D = NLUM_zero.copy()
 np.place(idx_out_LUTO_natural_2D.values, NLUM.values, idx_out_LUTO_natural.astype('uint8'))
 
 # Get the coordinates of the cells that are in natural state, inside/outside the LUTO study area
-idx_in_LUTO_natural_2D_bio = idx_in_LUTO_natural_2D.interp(x=bio_coord_x, y=bio_coord_y, method='nearest', kwargs={'fill_value': 0}).astype('bool')
+idx_in_LUTO_natural_2D_bio = idx_in_LUTO_2D.interp(x=bio_coord_x, y=bio_coord_y, method='nearest', kwargs={'fill_value': 0}).astype('bool')
 idx_out_LUTO_natural_2D_bio = idx_out_LUTO_natural_2D.interp(x=bio_coord_x, y=bio_coord_y, method='nearest', kwargs={'fill_value': 0}).astype('bool')
 
 
@@ -283,7 +272,7 @@ for ssp, mode in product(ensemble_df['ssp'].unique(), ensemble_df['mode'].unique
         }
     )
     
-    # Parallel processing put the data into the empty array
+    # Parallel processing to put the data into the empty array
     def get_arr(row):
         ds = rxr.open_rasterio(row['path']).sel(band=1).drop_vars('band')
         ds = xr.where(ds == ds.rio.nodata, 0, ds)
@@ -347,6 +336,8 @@ for nc in bio_suitability_ncs:
 
 # ------------------- Calculate the biodiversity score for each species  ------------------------------------------
 
+species_selected = ['Abutilon_grandifolium','Acacia_baeuerlenii','Glaphyromorphus_punctulatus','Goodenia_minutiflora']
+
 # Calculate the contribution, with real_area weighted
 bio_condition_ncs = glob(f'{bio_Carla_NetCDF_dir}/*_EnviroSuit.nc')
 
@@ -356,13 +347,14 @@ for nc in bio_condition_ncs:
     # Biodiversity scores for ALL Australia, inside LUTO study area, and outside LUTO study area
     score_sources = ['all', 'in', 'out']
     # Read the data
-    bio_suitability = xr.open_dataarray(nc, chunks={'year':1,'group':1})
-
+    bio_suitability = xr.open_dataarray(nc, chunks={'year': 1, 'species': 1}).sel(species=species_selected)
+    years = sorted([2010] + list(bio_suitability['year'].values))
+ 
     # Calculate the biodiversity score for each species
     bio_suitability_sum = xr.DataArray(
-        np.zeros((bio_suitability.sizes['year'], bio_suitability.sizes['species'], len(score_sources)), dtype='float32'),
+        np.zeros((len(years), bio_suitability.sizes['species'], len(score_sources)), dtype='float32'),
         dims=['year', 'species', 'source'],
-        coords={'year':bio_suitability['year'], 'species':bio_suitability['species'], 'source':score_sources}
+        coords={'year':years, 'species':bio_suitability['species'], 'source':score_sources}
     )
 
     def get_val(sel_year, sel_species):
@@ -374,23 +366,22 @@ for nc in bio_condition_ncs:
         # Multiply by the real area (ha) to get the biodiversity suitability score (i.e., area weighted suitability)
         arr = (arr * real_area_ha_2D).astype('float32')
         
-        if sel_year == 1990:
-            # Sum of biodiversity suitability score without degradation
-            all_sum = arr.sum(['y', 'x']).values
-            # Biodiversity suitability score with degradation
+        # Get the sum of biodiversity suitability score for all Australia, inside LUTO study area, and outside LUTO study area
+        all_sum = arr.sum(['y', 'x']).values
+        out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
+        
+        if sel_year == 2010:
             arr = arr * biodiv_degrade_ly_2D
-            in_sum = arr.where(idx_in_LUTO_natural_2D).sum(['y', 'x']).values
-            out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
+            in_sum = arr.where(idx_in_LUTO_2D).sum(['y', 'x']).values
         else:
-            all_sum = np.nan
             in_sum = np.nan
-            out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
+            
         return sel_year, sel_species, all_sum, in_sum, out_sum
         
     tasks = [
         delayed(get_val)(yr, sp) 
         for sp in bio_suitability['species'].values
-        for yr in bio_suitability['year'].values
+        for yr in years
     ]
     for yr, sp, val_sum, val_in, val_out in tqdm(Parallel(n_jobs=-1, return_as='generator')(tasks), total=len(tasks)):
         bio_suitability_sum.loc[yr, sp] = [val_sum, val_in, val_out]
@@ -405,17 +396,19 @@ for nc in bio_condition_ncs:
 '''
 The habitat suitability baselines are same for all SSPs, so here use SSP245 to calculate the baseline
 '''
-bio_score_baseline = pd.read_csv(f'{bio_Carla_NetCDF_dir}/bio_ssp245_EnviroSuit_Score.csv').query('year == 1990')
+bio_score_baseline = pd.read_csv(f'{bio_Carla_NetCDF_dir}/bio_ssp245_EnviroSuit_Score.csv').query('year == 2010')
 bio_score_baseline = bio_score_baseline.pivot(index=['species'], columns='source', values='BIO_SUITABILITY_AREA_WEIGHTED_SCORE_HA').reset_index()
-bio_score_baseline['HABITAT_SUITABILITY_BASELINE'] = bio_score_baseline.eval('(`in` + `out`) / `all`') * 100
+bio_score_baseline['HABITAT_SUITABILITY_BASELINE_PERCENT'] = bio_score_baseline.eval('(`in` + `out`) / `all`') * 100
 
 # Create a habitat suitability target csv file
-bio_target = bio_score_baseline[['species', 'HABITAT_SUITABILITY_BASELINE','all','out']].copy()
+bio_target = bio_score_baseline[['species', 'HABITAT_SUITABILITY_BASELINE_PERCENT','all','in','out']].copy()
 bio_target = bio_target.rename(columns={
     'all': 'HABITAT_SUITABILITY_BASELINE_SCORE_ALL_AUSTRALIA',
-    'out': 'HABITAT_SUITABILITY_BASELINE_SCORE_OUTSIDE_LUTO',
-    'HABITAT_SUITABILITY_BASELINE': 'HABITAT_SUITABILITY_BASELINE_PERCENT'
+    'in': 'HABITAT_SUITABILITY_BASELINE_SCORE_INSIDE_LUTO',
+    'out': 'HABITAT_SUITABILITY_BASELINE_SCORE_OUTSIDE_LUTO'
 })
+
+
 bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
 bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
 bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
@@ -425,7 +418,7 @@ bio_target.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_TARGET.csv', index
 # Get the biodiversity suitability area weighted scores for each SSP
 bio_scores = pd.DataFrame()
 
-for f in glob(f'{bio_Carla_NetCDF_dir}/*_Score.csv'):
+for f in glob(f'{bio_Carla_NetCDF_dir}/*EnviroSuit_Score.csv'):
     ssp = re.compile(r'bio_ssp(\d*)_').findall(f)[0]
     bio_out = pd.read_csv(f).query('year != 1990').query('source == "out"').drop(columns=['source']).set_index(['species', 'year'])
     bio_out = bio_out.rename(columns={'BIO_SUITABILITY_AREA_WEIGHTED_SCORE_HA': f'OUTSIDE_LUTO_NATURAL_SUITABILITY_AREA_WEIGHTED_HA_SSP{ssp}'})
@@ -437,7 +430,7 @@ bio_scores.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_SCORES.csv', index
 
 
 
-# ------------------- Calculate the biodiversity score for each species  ------------------------------------------
+# ------------------- Calculate the biodiversity score for each group  ------------------------------------------
 
 # Calculate the contribution, with real_area weighted
 bio_condition_ncs = glob(f'{bio_Carla_NetCDF_dir}/*_EnviroSuit_group.nc')
@@ -448,12 +441,14 @@ for nc in bio_condition_ncs:
     score_sources = ['all', 'in', 'out']
     # Read the data
     bio_group = xr.open_dataarray(nc, chunks={'year':1,'group':1})
+    
+    years = sorted([2010] + list(bio_group['year'].values))
 
     # Calculate the biodiversity score for each group
     bio_group_sum = xr.DataArray(
-        np.zeros((bio_group.sizes['year'], bio_group.sizes['group'], len(score_sources)), dtype='float32'),
+        np.zeros((len(years), bio_group.sizes['group'], len(score_sources)), dtype='float32'),
         dims=['year', 'group', 'source'],
-        coords={'year':bio_group['year'], 'group':bio_group['group'], 'source':score_sources}
+        coords={'year':years, 'group':bio_group['group'], 'source':score_sources}
     )
 
 
@@ -466,27 +461,26 @@ for nc in bio_condition_ncs:
         # Multiply by the real area (ha) to get the biodiversity suitability score (i.e., area weighted suitability)
         arr = (arr * real_area_ha_2D).astype('float32')
         
-        if sel_year == 1990:
-            # Sum of biodiversity suitability score without degradation
-            all_sum = arr.sum(['y', 'x']).values
-            # Biodiversity suitability score with degradation
+        # Get the sum of biodiversity suitability score for all Australia, inside LUTO study area, and outside LUTO study area
+        all_sum = arr.sum(['y', 'x']).values
+        out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
+        
+        if sel_year == 2010:
             arr = arr * biodiv_degrade_ly_2D
-            in_sum = arr.where(idx_in_LUTO_natural_2D).sum(['y', 'x']).values
-            out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
+            in_sum = arr.where(idx_in_LUTO_2D).sum(['y', 'x']).values
         else:
-            all_sum = np.nan
             in_sum = np.nan
-            out_sum = arr.where(idx_out_LUTO_natural_2D).sum(['y', 'x']).values
+            
         return sel_year, sel_group, all_sum, in_sum, out_sum
-    
+        
     tasks = [
-        delayed(get_val)(yr, sp) 
-        for sp in bio_group['group'].values
-        for yr in bio_group['year'].values
+        delayed(get_val)(yr, gp) 
+        for gp in bio_suitability['species'].values
+        for yr in years
     ]
     
-    for yr, sp, val_sum, val_in, val_out in tqdm(Parallel(n_jobs=5, return_as='generator')(tasks), total=len(tasks)):
-        bio_group_sum.loc[yr, sp] = [val_sum, val_in, val_out]
+    for yr, gp, val_sum, val_in, val_out in tqdm(Parallel(n_jobs=5, return_as='generator')(tasks), total=len(tasks)):
+        bio_group_sum.loc[yr, gp] = [val_sum, val_in, val_out]
         
         
     bio_group_sum.to_dataframe('BIO_SUITABILITY_AREA_WEIGHTED_SCORE_HA').reset_index().to_csv(f'{bio_Carla_NetCDF_dir}/{fname}.csv', index=False)
@@ -497,16 +491,16 @@ for nc in bio_condition_ncs:
 '''
 The habitat suitability baselines are same for all SSPs, so here use SSP245 to calculate the baseline
 '''
-bio_score_baseline = pd.read_csv(f'{bio_Carla_NetCDF_dir}/bio_ssp245_EnviroSuit_group_Score.csv').query('year == 1990')
+bio_score_baseline = pd.read_csv(f'{bio_Carla_NetCDF_dir}/bio_ssp245_EnviroSuit_group_Score.csv').query('year == 2010')
 bio_score_baseline = bio_score_baseline.pivot(index=['group'], columns='source', values='BIO_SUITABILITY_AREA_WEIGHTED_SCORE_HA').reset_index()
-bio_score_baseline['HABITAT_SUITABILITY_BASELINE'] = bio_score_baseline.eval('(`in` + `out`) / `all`') * 100
+bio_score_baseline['HABITAT_SUITABILITY_BASELINE_PERCENT'] = bio_score_baseline.eval('(`in` + `out`) / `all`') * 100
 
 # Create a habitat suitability target csv file
-bio_target = bio_score_baseline[['group', 'HABITAT_SUITABILITY_BASELINE','all','out']].copy()
+bio_target = bio_score_baseline[['group', 'HABITAT_SUITABILITY_BASELINE_PERCENT','in','all','out']].copy()
 bio_target = bio_target.rename(columns={
     'all': 'HABITAT_SUITABILITY_BASELINE_SCORE_ALL_AUSTRALIA',
+    'in': 'HABITAT_SUITABILITY_BASELINE_SCORE_INSIDE_LUTO',
     'out': 'HABITAT_SUITABILITY_BASELINE_SCORE_OUTSIDE_LUTO',
-    'HABITAT_SUITABILITY_BASELINE': 'HABITAT_SUITABILITY_BASELINE_PERCENT'
 })
 
 bio_target.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_TARGET_GROUP.csv', index=False)
@@ -567,7 +561,7 @@ ref_meta = {
 
 
 # Define the k-v pair for presence 
-presence_dict = {1: 'MAYBE', 2: 'LIKELY'}   # 
+presence_dict = {1: 'MAYBE', 2: 'LIKELY'}   
 
 
 # Read the SNES biodiversity data; dissolve the data by 'SCIENTIFIC_NAME'
