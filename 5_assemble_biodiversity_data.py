@@ -1191,7 +1191,7 @@ for gdb_path, layer_raster, layer_attribute in files:
     dst_array_xr = dst_array_xr.sel(group=~dst_array_xr.group.isin(rm_names))
     
     # Reorder the groups lexicographically
-    dst_array_xr = dst_array_xr.sortby('group')
+    dst_array_xr = dst_array_xr.sortby('group').assign_coords(IBRA_ID=(['cell'], zones['IBRA_ID'].values))
     
     # Save xarray DataArray to NetCDF
     encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}}
@@ -1211,14 +1211,9 @@ for gdb_path, layer_raster, layer_attribute in files:
 NVIS_pre_mvg_xr = xr.load_dataarray(f'{NVIS_SAVE_path}/NVIS7_0_AUST_PRE_MVG.nc') / 100  # Convert percentage to fraction
 NVIS_pre_mvs_xr = xr.load_dataarray(f'{NVIS_SAVE_path}/NVIS7_0_AUST_PRE_MVS.nc') / 100  # Convert percentage to fraction
 
-# Assign each cell with IBRA ID
-NVIS_pre_mvg_xr = NVIS_pre_mvg_xr.assign_coords(IBRA_ID=(['cell'], zones['IBRA_ID'].values))
-NVIS_pre_mvs_xr = NVIS_pre_mvs_xr.assign_coords(IBRA_ID=(['cell'], zones['IBRA_ID'].values))
-
 # Get the NVIS names
 NVIS_pre_mvg_names = NVIS_pre_mvg_xr.coords['group'].values.tolist()
 NVIS_pre_mvs_names = NVIS_pre_mvs_xr.coords['group'].values.tolist()
-
 
 # Total vegataion area (ha) pre-1750 
 NVIS_pre_mvg_total_ha = NVIS_pre_mvg_xr * zones['CELL_HA'].values[None, :]
@@ -1272,21 +1267,21 @@ NVIS_pre_mvs_IBRA.insert(2, 'BASE_YR_PERCENT', NVIS_pre_mvs_IBRA.eval(
 
 
 # Append a user-defined target column
-NVIS_pre_mvg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', 30)
+NVIS_pre_mvg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', 50)
 NVIS_pre_mvg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', 50)
-NVIS_pre_mvg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', 50)
+NVIS_pre_mvg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', 30)
 
-NVIS_pre_mvs.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', 30)
+NVIS_pre_mvs.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', 50)
 NVIS_pre_mvs.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', 50)
-NVIS_pre_mvs.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', 50)
+NVIS_pre_mvs.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', 30)
 
-NVIS_pre_mvg_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2100', 30)
-NVIS_pre_mvg_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2050', 50)
-NVIS_pre_mvg_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2030', 50)
+NVIS_pre_mvg_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
+NVIS_pre_mvg_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
+NVIS_pre_mvg_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
 
-NVIS_pre_mvs_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2100', 30)
-NVIS_pre_mvs_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2050', 50)
-NVIS_pre_mvs_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2030', 50)
+NVIS_pre_mvs_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
+NVIS_pre_mvs_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
+NVIS_pre_mvs_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
 
 # Combine all CSVs and save them to Excel
 csv_files = {
