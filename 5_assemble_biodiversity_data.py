@@ -133,7 +133,7 @@ with pd.ExcelWriter(f'{bio_Carla_NetCDF_dir}/GBF2_conserve_performance.xlsx') as
 
 
 ###############################################################################################
-#                  Process Speciese Suitability data (GBF4A) with Xarray                      #
+#                  Process Speciese Suitability data (GBF8) with Xarray                       #
 ###############################################################################################
 
 
@@ -413,7 +413,7 @@ bio_target = bio_target.rename(columns={
 bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
 bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
 bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
-bio_target.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_TARGET.csv', index=False)
+bio_target.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF8_TARGET.csv', index=False)
 
 
 # Get the biodiversity suitability area weighted scores for each SSP
@@ -426,7 +426,7 @@ for f in glob(f'{bio_Carla_NetCDF_dir}/*EnviroSuit_Score.csv'):
     bio_scores = pd.concat([bio_scores, bio_out], axis=1)
 
 bio_scores = bio_scores.reset_index()
-bio_scores.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_SCORES.csv', index=False)
+bio_scores.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF8_SCORES.csv', index=False)
 
 
 
@@ -504,7 +504,7 @@ bio_target = bio_target.rename(columns={
     'out': 'HABITAT_SUITABILITY_BASELINE_SCORE_OUTSIDE_LUTO',
 })
 
-bio_target.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_TARGET_GROUP.csv', index=False)
+bio_target.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF8_TARGET_GROUP.csv', index=False)
     
     
 # Get the biodiversity suitability area weighted scores for each SSP
@@ -517,14 +517,14 @@ for f in glob(f'{bio_Carla_NetCDF_dir}/*group_Score.csv'):
     bio_scores = pd.concat([bio_scores, bio_out], axis=1)
 
 bio_scores = bio_scores.reset_index()
-bio_scores.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF4A_SCORES_GROUP.csv', index=False)
+bio_scores.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF8_SCORES_GROUP.csv', index=False)
 
 
 
 
 
 ################################################################################
-#           Process Biodiversity Data (DCCEEW) (GBF4B) with Xarray             #
+#           Process Biodiversity Data (DCCEEW) (GBF4) with Xarray             #
 ################################################################################
 
 
@@ -599,7 +599,7 @@ def get_presense_and_save_path(row):
 
 
 
-# Function to rasterise the data, note here converting the rasterised data to boolean
+# Function to rasterise the data
 def rasterize(row):
     val, save_path = get_presense_and_save_path(row)
     # Rasterise the polygon
@@ -664,11 +664,11 @@ For each SNES/ECNES species, we have rasterised them into two layers: 'LIKELY' a
 1 to indicate 'MAYBE' and 2 for 'LIKELY'. 
 
 Here we merge the two layers into a single layer by assiging 0.8 for 'LIKELY' and 0.3 for 'MAYBE'. The merged layer is then saved
-to the '{SNES_TIF_path}/LIKELY_MAYBE_MERGED/' folder. A csv file containing the metadata of the dissolved vector data and paths to the rasterised
-data is also saved to '{SNES_TIF_path}/DCCEEW_SNES_meta_merged.csv'.
+to the '{SNES_TIF_path}/LIKELY_MAYBE_MERGED/' folder. A csv file containing the metadata of the dissolved vector data and paths 
+to the rasterised data is also saved to '{SNES_TIF_path}/DCCEEW_SNES_meta_merged.csv'.
 
 Note: The 'LIKELY' and 'MAYBE' layers are not overlapped, 'MAYBE' layers are surrounding the 'LIKELY' layers. So we just need to assign
-values to cells and then sum them up to get the merged layer.
+0.3 to 'MAYBE' cells and add them to 'LIKELY' layers to get the merged layer.
 
 '''
 
@@ -682,7 +682,7 @@ ref_meta.update({'dtype': 'float32', 'nodata': np.nan})
 snes_meta = pd.read_csv(f'{SNES_TIF_path}/DCCEEW_SNES_meta.csv')
 
 # Function to merge the 'LIKELY' and 'MAYBE' layers
-def merge_arr(in_df):
+def merge_species(in_df): # Suppose in_df is the dataframe for a single species
     arr_merge = []
     for _,row in in_df.iterrows():
         # Get the raw value and raw save-path
@@ -709,7 +709,7 @@ for _,df in snes_meta.groupby(['SCIENTIFIC_NAME']):
         os.makedirs(save_dir, exist_ok=True)
         
     def merge_save(in_df, to_path):
-        arr = merge_arr(in_df)
+        arr = merge_species(in_df)
         with rasterio.open(to_path, 'w', **ref_meta) as dst:
             dst.write(arr, 1)
             
@@ -749,7 +749,7 @@ for _,df in ecnes_meta.groupby(['COMMUNITY']):
         os.makedirs(save_dir, exist_ok=True)
         
     def merge_save(in_df, to_path):
-        arr = merge_arr(in_df)
+        arr = merge_species(in_df)
         with rasterio.open(to_path, 'w', **ref_meta) as dst:
             dst.write(arr, 1)
             
@@ -792,7 +792,7 @@ SNES_arr = xr.DataArray(
 # Parallel processing to put the data into the empty array
 def get_arr(row):
     ds = rxr.open_rasterio(row['TIF_PATH']).sel(band=1).drop_vars('band')
-    ds = xr.where(ds.isin([1, 2]), 1, 0).astype(np.bool_)                       # 1 is 'MAYBE', 2 is 'LIKELY'.
+    ds = xr.where(ds.isin([1, 2]), 1, 0).astype(np.bool_)                       # 1 is 'MAYBE', 2 is 'LIKELY'. This changes 1/2 to 1, and 0 to 0
     ds = ds.values[np.nonzero(NLUM.values)]
     return row['SCIENTIFIC_NAME'], row['PRESENCE_RANK'], ds
 
@@ -802,7 +802,7 @@ for species,rank,arr in tqdm(Parallel(n_jobs=20, return_as='generator')(tasks), 
     SNES_arr.loc[species, rank] = arr
     
 # Sum the 'LIKELY' and 'MAYBE' layers to get the full species distribution
-SNES_arr_LIKELY_MAYBE_sum = SNES_arr.sum('presence').astype(np.bool_)           # 0 is 'NOT PRESENT', 1 is 'MAYBE AND LIKELY'
+SNES_arr_LIKELY_MAYBE_sum = SNES_arr.sum('presence').astype(np.bool_)           # 0 is 'No Presence', 1 is 'likely and maybe'
 SNES_arr.loc[dict(presence=1)] = SNES_arr_LIKELY_MAYBE_sum.values
 SNES_arr.coords['presence'] = ['LIKELY', 'LIKELY_AND_MAYBE']
 
@@ -831,7 +831,7 @@ def get_area(arr):
     score_area_weighted_out_LUTO = arr * idx_out_LUTO_natural * zones['CELL_HA'].values
     return [{
         'ALL_HA':score_area_weighted_all_Australia.sum(), 
-        'NATURAL_IN_LUTO_HA':score_area_weighted_in_LUTO.sum(),
+        'IN_LUTO_HA':score_area_weighted_in_LUTO.sum(),
         'NATURAL_OUT_LUTO_HA':score_area_weighted_out_LUTO.sum()
     }]
 
@@ -861,11 +861,11 @@ SNES_meta_att = SNES_meta_att.drop(columns=['PRESENCE_CATEGORY', 'PRESENCE_RANK'
 SNES_df = SNES_in_out_LUTO_area.copy()
 SNES_df['HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA'] = SNES_df['ALL_HA']
 SNES_df['HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL'] = SNES_df['NATURAL_OUT_LUTO_HA']
-SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = SNES_df['NATURAL_IN_LUTO_HA'] + SNES_df['NATURAL_OUT_LUTO_HA']
+SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = SNES_df['IN_LUTO_HA'] + SNES_df['NATURAL_OUT_LUTO_HA']
 SNES_df['HABITAT_SIGNIFICANCE_BASELINE_PERCENT'] = SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] / SNES_df['ALL_HA'] * 100
 
 # Drop unneeded columns, and split the data into three dataframes based on the PRESENCE_RANK
-SNES_df = SNES_df.drop(columns=['ALL_HA', 'NATURAL_IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA'])
+SNES_df = SNES_df.drop(columns=['ALL_HA', 'IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA'])
 SNES_df_LIKELY = SNES_df.query('PRESENCE_RANK == "LIKELY"').copy().drop(columns=['PRESENCE_RANK'])
 SNES_df_LIKELY_MAYBE = SNES_df.query('PRESENCE_RANK == "LIKELY_AND_MAYBE"').copy().drop(columns=['PRESENCE_RANK'])
 
@@ -967,7 +967,7 @@ def get_area(arr):
     score_area_weighted_out_LUTO = arr * idx_out_LUTO_natural * zones['CELL_HA'].values
     return [{
         'ALL_HA':score_area_weighted_all_Australia.sum(), 
-        'NATURAL_IN_LUTO_HA':score_area_weighted_in_LUTO.sum(),
+        'IN_LUTO_HA':score_area_weighted_in_LUTO.sum(),
         'NATURAL_OUT_LUTO_HA':score_area_weighted_out_LUTO.sum()
     }]
     
@@ -999,7 +999,7 @@ ECNES_meta_att = ECNES_meta_att.drop(columns=['PRES_RANK', 'SHAPE_Length', 'SHAP
 ECNES_df = ECNES_in_out_LUTO_area.copy().reset_index()
 ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA'] = ECNES_df['ALL_HA']
 ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL'] = ECNES_df['NATURAL_OUT_LUTO_HA']
-ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = ECNES_df['NATURAL_IN_LUTO_HA'] + ECNES_df['NATURAL_OUT_LUTO_HA']
+ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = ECNES_df['IN_LUTO_HA'] + ECNES_df['NATURAL_OUT_LUTO_HA']
 ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_PERCENT'] = ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] / ECNES_df['ALL_HA'] * 100
 
 # Fill the missing COMMUNITY and PRES_RANK with nan
@@ -1007,7 +1007,7 @@ re_index = pd.MultiIndex.from_product([ECNES_df['COMMUNITY'].unique(), ECNES_df[
 ECNES_df = ECNES_df.set_index(['COMMUNITY', 'PRES_RANK']).reindex(re_index).reset_index()
     
 # Drop unneeded columns, and split the data into three dataframes based on the PRES_RANK
-ECNES_df = ECNES_df.drop(columns=['ALL_HA', 'NATURAL_IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA'])
+ECNES_df = ECNES_df.drop(columns=['ALL_HA', 'IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA'])
 ECNES_df_LIKELY = ECNES_df.query('PRES_RANK == "LIKELY"').copy().drop(columns=['PRES_RANK'])
 ECNES_df_LIKELY_MAYBE = ECNES_df.query('PRES_RANK == "LIKELY_AND_MAYBE"').copy().drop(columns=['PRES_RANK'])
 
