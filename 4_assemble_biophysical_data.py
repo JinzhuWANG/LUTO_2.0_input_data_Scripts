@@ -855,7 +855,7 @@ for ssp in ['ssp126', 'ssp245', 'ssp370', 'ssp585']:
 
 
 
-# ------------ Habitat Condition Assessment System [HCAS] data (https://data.csiro.au/collection/csiro%3A58717v6) ------------
+# ------------ Habitat Condition Assessment System [HCAS] data (https://data.csiro.au/collection/csiro:63571) ------------
 
 
 HCAS_path = "N:/Data-Master/Habitat_condition_assessment_system/Data"
@@ -903,7 +903,7 @@ HCAS_LUMAP_PERCENTILE_df.to_csv(f"{HCAS_path}/Processed/HABITAT_CONDITION.csv")
 
 
 
-# ------------ National Connectivity Index [NCI] (https://data.csiro.au/collection/csiro%3A58717v6) ------------
+# ------------ National Connectivity Index [NCI] (https://data.csiro.au/collection/csiro:63571) ------------
 
 NCI_reproj_NLUM = reproj_resample(
     f'{HCAS_path}/HCAS_v3.1/4.CONNECTIVITY.CONDITION/NCI/HCAS31_NCIB_1988_2022.tif',

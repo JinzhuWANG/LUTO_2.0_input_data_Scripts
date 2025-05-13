@@ -30,8 +30,7 @@ bio_Carla_EnviroSuit_dir = 'N:/Data-Master/Biodiversity/Environmental-suitabilit
 bio_Carla_GTIFF_dir  = f'{bio_Carla_EnviroSuit_dir}/Annual-species-suitability_20-year_snapshots_5km'
 bio_Carla_NetCDF_dir = f'{bio_Carla_EnviroSuit_dir}/Annual-species-suitability_20-year_snapshots_5km_to_NetCDF'
 
-SNES_TIF_path = 'N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF'
-bio_DCCEEW_dir = 'N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF/To_NetCDF'
+SNES_ECNES_dir = 'N:/Data-Master/Biodiversity/DCCEEW/SNES_ECNES'
 
 NVIS_PRE_1750_path = 'N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL'
 NVIS_SAVE_path = 'N:/Data-Master/NVIS/Processed'
@@ -535,8 +534,8 @@ This section rasterises the SNES and ECNES data to GEOTIFF files. The data is di
 and 'COMMUNITY' for ECNES.
 
 Each cell is assigned a value of 1 for 'maybe present' and 2 for 'likely present'. The rasterised data is then saved
-to the '{SNES_TIF_path}/DISSOLVED_VECTOR/' folder. A csv file containing the metadata of the dissolved vector data and 
-paths to the rasterised data is also saved to '{SNES_TIF_path}/DCCEEW_SNES_meta.csv'.
+to the '{SNES_ECNES_dir}/Processed/' folder. A csv file containing the metadata of the dissolved vector data and 
+paths to the rasterised data is also saved to '{SNES_ECNES_dir}/DCCEEW_SNES_meta.csv'.
 
 Note: The 'LIKELY' and 'MAYBE' layers are not overlapped, 'MAYBE' layers are surrounding the 'LIKELY' layers.
 
@@ -562,24 +561,24 @@ ref_meta = {
 
 
 # Define the k-v pair for presence 
-presence_dict = {1: 'MAYBE', 2: 'LIKELY'}   
+presence_dict = {1: 'MAYBE', 2: 'LIKELY'}
 
 
 # Read the SNES biodiversity data; dissolve the data by 'SCIENTIFIC_NAME'
-if os.path.exists(f"{SNES_TIF_path}/DISSOLVED_VECTOR/snes_dissolve.geojson"):
-    snes_dissolve = gpd.read_file(f"{SNES_TIF_path}/DISSOLVED_VECTOR/snes_dissolve.geojson")
+if os.path.exists(f"{SNES_ECNES_dir}/Processed/snes_dissolve.gpkg"):
+    snes_dissolve = gpd.read_file(f"{SNES_ECNES_dir}/Processed/snes_dissolve.gpkg")
 else:
-    snes = gpd.read_file("N:/Data-Master/Biodiversity/DCCEEW/snes_public_gdb.gdb", driver="OpenFileGDB", layer="SNES_Public")
+    snes = gpd.read_file(f"{SNES_ECNES_dir}/SNES_version_6 March 2025/snes_public_gdb.gdb", driver="OpenFileGDB", layer="SNES_Public")
     snes_dissolve = snes.dissolve(by=['SCIENTIFIC_NAME','PRESENCE_CATEGORY']).reset_index()
-    snes_dissolve.to_file(f"{SNES_TIF_path}/DISSOLVED_VECTOR/snes_dissolve.geojson")
+    snes_dissolve.to_file(f"{SNES_ECNES_dir}/Processed/snes_dissolve.gpkg")
 
 # Read the ECNES biodiversity data; dissolve the data by 'COMMUNITY'   
-if os.path.exists(f"{SNES_TIF_path}/DISSOLVED_VECTOR/ecnes_dissolve.geojson"):
-    ecnes_dissolve = gpd.read_file(f"{SNES_TIF_path}/DISSOLVED_VECTOR/ecnes_dissolve.geojson")
+if os.path.exists(f"{SNES_ECNES_dir}/Processed/ecnes_dissolve.gpkg"):
+    ecnes_dissolve = gpd.read_file(f"{SNES_ECNES_dir}/Processed/ecnes_dissolve.gpkg")
 else:
-    ecnes = gpd.read_file("N:/Data-Master/Biodiversity/DCCEEW/ECnes_public_gdb.gdb", driver="OpenFileGDB", layer="ECnes_public")
+    ecnes = gpd.read_file(f"{SNES_ECNES_dir}/ECNES_versoin_4 September 2024/ECnes_public_gdb.gdb", driver="OpenFileGDB", layer="ECnes_public")
     ecnes_dissolve = ecnes.dissolve(by=['COMMUNITY', 'CATEGORY']).reset_index()
-    ecnes_dissolve.to_file(f"{SNES_TIF_path}/DISSOLVED_VECTOR/ecnes_dissolve.geojson")
+    ecnes_dissolve.to_file(f"{SNES_ECNES_dir}/Processed/ecnes_dissolve.gpkg")
 
 
 def get_presense_and_save_path(row):
@@ -587,11 +586,11 @@ def get_presense_and_save_path(row):
     if 'PRES_RANK' in row:  # ECNES data
         val = row['PRES_RANK']
         name = row['COMMUNITY'].replace('/', '_')
-        save_path = f'{SNES_TIF_path}/ECNES/{name}_{presence_dict[val]}.tif'
+        save_path = f'{SNES_ECNES_dir}/Processed/ECNES/{name}_{presence_dict[val]}.tif'
     else:                   # SNES data
         val = row['PRESENCE_RANK']
         name = row['SCIENTIFIC_NAME'].replace('/', '_')
-        save_path = f'{SNES_TIF_path}/SNES/{row["TAXON_GROUP"]}/{name}/{name}_{presence_dict[val]}.tif'
+        save_path = f'{SNES_ECNES_dir}/Processed/SNES/{row["TAXON_GROUP"]}/{name}/{name}_{presence_dict[val]}.tif'
     
     # Replace spaces with underscores
     save_path = save_path.replace(' ', '_')
@@ -601,10 +600,10 @@ def get_presense_and_save_path(row):
 
 # Function to rasterise the data
 def rasterize(row):
-    val, save_path = get_presense_and_save_path(row)
+    _, save_path = get_presense_and_save_path(row)
     # Rasterise the polygon
     arr = rasterio.features.rasterize(
-        [(row["geometry"], val)],
+        [(row["geometry"], 1)],
         out_shape=ref_mask.shape,
         transform=ref_meta['transform'],
         all_touched=False,
@@ -620,15 +619,15 @@ def rasterize(row):
 
 # Create folders for SNES data
 for _,row in snes_dissolve.iterrows():
-    tif_path = get_presense_and_save_path(row)[1]
+    _,tif_path = get_presense_and_save_path(row)
     folder = os.path.dirname(tif_path)
     if os.path.exists(folder):
         continue
     os.makedirs(folder, exist_ok=True)
     
 # Create folders for ECNES data; Only a single folder to store all the data
-if not os.path.exists(f'{SNES_TIF_path}/ECNES'):
-    os.makedirs(f'{SNES_TIF_path}/ECNES', exist_ok=True)
+if not os.path.exists(f'{SNES_ECNES_dir}/Processed/ECNES'):
+    os.makedirs(f'{SNES_ECNES_dir}/Processed/ECNES', exist_ok=True)
     
     
 
@@ -640,7 +639,7 @@ for _ in tqdm(Parallel(n_jobs=n_workers, return_as='generator')(tasks), total=le
 # Save SNES attributes to csv
 snes_meta = snes_dissolve.copy().drop(columns='geometry')
 snes_meta['TIF_PATH'] = snes_meta.apply(lambda x: get_presense_and_save_path(x)[1], axis=1)
-snes_meta.to_csv(f'{SNES_TIF_path}/DCCEEW_SNES_meta.csv', index=False)
+snes_meta.to_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv', index=False)
 
 
 
@@ -654,20 +653,20 @@ for out in tqdm(Parallel(n_jobs=n_workers, return_as='generator')(tasks), total=
 # Save ECNES attributes to csv
 ecnes_meta = ecnes_dissolve.copy().drop(columns='geometry')
 ecnes_meta['TIF_PATH'] = ecnes_meta.apply(lambda x: get_presense_and_save_path(x)[1], axis=1)
-ecnes_meta.to_csv(f'{SNES_TIF_path}/DCCEEW_ECNES_meta.csv', index=False)
+ecnes_meta.to_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta.csv', index=False)
 
 
 
 # ------------------- Merge 'LIKELY' and 'MAYBE' layer ------------------------------------------
 '''
 For each SNES/ECNES species, we have rasterised them into two layers: 'LIKELY' and 'MAYBE' (some only has 'LIKELY'), and use
-1 to indicate 'MAYBE' and 2 for 'LIKELY'. 
+1 to indicate existence, 0 for non-existence.
 
 Here we merge the two layers into a single layer by assiging 0.8 for 'LIKELY' and 0.3 for 'MAYBE'. The merged layer is then saved
-to the '{SNES_TIF_path}/LIKELY_MAYBE_MERGED/' folder. A csv file containing the metadata of the dissolved vector data and paths 
-to the rasterised data is also saved to '{SNES_TIF_path}/DCCEEW_SNES_meta_merged.csv'.
+to the '{SNES_ECNES_dir}/Processed/LIKELY_MAYBE_MERGED/' folder. A csv file containing the metadata of the dissolved vector data and paths 
+to the rasterised data is also saved to '{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta_merged.csv'.
 
-Note: The 'LIKELY' and 'MAYBE' layers are not overlapped, 'MAYBE' layers are surrounding the 'LIKELY' layers. So we just need to assign
+Note: The 'LIKELY' and 'MAYBE' layers are not overlapping, 'MAYBE' layers are surrounding the 'LIKELY' layers. So we just need to assign
 0.3 to 'MAYBE' cells and add them to 'LIKELY' layers to get the merged layer.
 
 '''
@@ -679,7 +678,7 @@ bio_raw2val = {2: 0.8, 1: 0.3} # 2 is 'LIKELY', 1 is 'MAYBE'; this is a mapping 
 ref_meta.update({'dtype': 'float32', 'nodata': np.nan})
 
 # Read the SNES metadata
-snes_meta = pd.read_csv(f'{SNES_TIF_path}/DCCEEW_SNES_meta.csv')
+snes_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv')
 
 # Function to merge the 'LIKELY' and 'MAYBE' layers
 def merge_species(in_df): # Suppose in_df is the dataframe for a single species
@@ -689,7 +688,7 @@ def merge_species(in_df): # Suppose in_df is the dataframe for a single species
         raw_val,_ = get_presense_and_save_path(row)
         # Map the raw value to the new value
         arr = rasterio.open(row['TIF_PATH']).read(1).astype('float32')
-        arr = np.where(arr == raw_val, bio_raw2val[raw_val], 0)
+        arr = np.where(arr == 1, bio_raw2val[raw_val], 0)
         arr_merge.append(arr)
     return np.stack(arr_merge).sum(axis=0)
 
@@ -703,7 +702,7 @@ for _,df in snes_meta.groupby(['SCIENTIFIC_NAME']):
     first_row = df.iloc[0]
     name = first_row['SCIENTIFIC_NAME'].replace('/', '_').replace(' ', '_')
     # Create a new folder to store the merged data
-    save_dir = f'{SNES_TIF_path}/LIKELY_MAYBE_MERGED/SNES/{first_row["TAXON_GROUP"]}'
+    save_dir = f'{SNES_ECNES_dir}/Processed/LIKELY_MAYBE_MERGED/SNES/{first_row["TAXON_GROUP"]}'
     save_path = f'{save_dir}/{name}.tif'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir, exist_ok=True)
@@ -727,14 +726,14 @@ snes_meta_merged = snes_meta.copy()
 snes_meta_merged = snes_meta_merged.groupby(['SCIENTIFIC_NAME']).aggregate('first').reset_index()
 snes_meta_merged = snes_meta_merged.drop(columns=['PRESENCE_CATEGORY', 'PRESENCE_RANK','SHAPE_Length', 'SHAPE_Area', 'TIF_PATH'])
 snes_meta_merged = snes_meta_merged.merge(save_paths, on='LISTED_TAXON_ID')
-snes_meta_merged.to_csv(f'{SNES_TIF_path}/DCCEEW_SNES_meta_merged.csv', index=False)
+snes_meta_merged.to_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta_merged.csv', index=False)
 
 
 
 
 
 # Merge ECNES data
-ecnes_meta = pd.read_csv(f'{SNES_TIF_path}/DCCEEW_ECNES_meta.csv')
+ecnes_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta.csv')
 
 tasks = []
 save_paths = pd.DataFrame()
@@ -743,7 +742,7 @@ for _,df in ecnes_meta.groupby(['COMMUNITY']):
     first_row = df.iloc[0]
     name = first_row['COMMUNITY'].replace('/', '_').replace(' ', '_')
     # Create a new folder to store the merged data
-    save_dir = f'{SNES_TIF_path}/LIKELY_MAYBE_MERGED/ECNES'
+    save_dir = f'{SNES_ECNES_dir}/Processed/LIKELY_MAYBE_MERGED/ECNES'
     save_path = f'{save_dir}/{name}.tif'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir, exist_ok=True)
@@ -768,15 +767,15 @@ ecnes_meta_merged = ecnes_meta.copy()
 ecnes_meta_merged = ecnes_meta_merged.groupby(['COMMUNITY']).aggregate('first').reset_index()
 ecnes_meta_merged = ecnes_meta_merged.drop(columns=['PRES_RANK', 'CATEGORY', 'SHAPE_Length', 'SHAPE_Area', 'TIF_PATH'])
 ecnes_meta_merged = ecnes_meta_merged.merge(save_paths, on='COM_ID')
-ecnes_meta_merged.to_csv(f'{SNES_TIF_path}/DCCEEW_ECNES_meta_merged.csv', index=False)
+ecnes_meta_merged.to_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta_merged.csv', index=False)
 
 
 
 
-# ------------------- Masking GEOTIFFs and save SNES to NetCDF ------------------------------------------
+# ------------------- Masking merged GEOTIFFs and save to NetCDF ------------------------------------------
 
 # Read DCCEEW SNES GeoTIFF file paths
-SNES_meta = pd.read_csv('N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF/DCCEEW_SNES_meta.csv')
+SNES_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv')
 
 # Create an empty array to store the data
 SNES_arr = xr.DataArray(
@@ -792,7 +791,7 @@ SNES_arr = xr.DataArray(
 # Parallel processing to put the data into the empty array
 def get_arr(row):
     ds = rxr.open_rasterio(row['TIF_PATH']).sel(band=1).drop_vars('band')
-    ds = xr.where(ds.isin([1, 2]), 1, 0).astype(np.bool_)                       # 1 is 'MAYBE', 2 is 'LIKELY'. This changes 1/2 to 1, and 0 to 0
+    ds = xr.where(ds, 1, 0).astype(np.bool_)                    
     ds = ds.values[np.nonzero(NLUM.values)]
     return row['SCIENTIFIC_NAME'], row['PRESENCE_RANK'], ds
 
@@ -810,7 +809,7 @@ SNES_arr.coords['presence'] = ['LIKELY', 'LIKELY_AND_MAYBE']
 # Save to nc, chunked by species
 SNES_arr.name = 'data'
 SNES_arr.to_netcdf(
-    f'{bio_DCCEEW_dir}/bio_DCCEEW_SNES.nc', 
+    f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES.nc', 
     mode='w', 
     encoding={'data': {
         "compression": "gzip", 
@@ -825,6 +824,9 @@ SNES_arr.to_netcdf(
 
 
 # ------------------- Calculate the biodiversity score for SNES  ------------------------------------------
+
+SNES_arr = xr.open_dataarray(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES.nc', chunks={'species': 1, 'presence': 1})
+
 def get_area(arr):
     score_area_weighted_all_Australia = arr * zones['CELL_HA'].values
     score_area_weighted_in_LUTO = arr * idx_in_LUTO * zones['CELL_HA'].values * biodiv_degrade_ly
@@ -860,6 +862,7 @@ SNES_meta_att = SNES_meta_att.drop(columns=['PRESENCE_CATEGORY', 'PRESENCE_RANK'
 # Save the inside/outside LUTO data to csv
 SNES_df = SNES_in_out_LUTO_area.copy()
 SNES_df['HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA'] = SNES_df['ALL_HA']
+SNES_df['HABITAT_SIGNIFICANCE_BASELINE_INSIDE_LUTO_NATURAL'] = SNES_df['IN_LUTO_HA']
 SNES_df['HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL'] = SNES_df['NATURAL_OUT_LUTO_HA']
 SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = SNES_df['IN_LUTO_HA'] + SNES_df['NATURAL_OUT_LUTO_HA']
 SNES_df['HABITAT_SIGNIFICANCE_BASELINE_PERCENT'] = SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] / SNES_df['ALL_HA'] * 100
@@ -900,10 +903,13 @@ cols = ['SCIENTIFIC_NAME','VERNACULAR_NAME',
         'USER_DEFINED_TARGET_PERCENT_2050_LIKELY_MAYBE',
         'USER_DEFINED_TARGET_PERCENT_2100_LIKELY_MAYBE',
         
-        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY',
         'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY',
-        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY',
+        'HABITAT_SIGNIFICANCE_BASELINE_INSIDE_LUTO_NATURAL_LIKELY',
+ 
         'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
 
         'LISTED_TAXON_ID','MAP_TAXON_ID', 'THREATENED_STATUS',
         'MIGRATORY_STATUS', 'MARINE', 'CETACEAN', 'EXTRACT_DATE', 'TAXON_GROUP',
@@ -912,14 +918,14 @@ cols = ['SCIENTIFIC_NAME','VERNACULAR_NAME',
         'SPRAT_PROFILE']
 
 SNES_df = SNES_df[cols]
-SNES_df.to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_SNES_target1.csv', index=False)
+SNES_df.to_csv(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES_target.csv', index=False)
 
 
 
 # ------------------- Masking GEOTIFFs and save ECNES to NetCDF ------------------------------------------
 
 # Read DCCEEW ECNES GeoTIFF file paths
-ECNES_meta = pd.read_csv('N:/Data-Master/Biodiversity/DCCEEW/SNES_GEOTIFF/DCCEEW_ECNES_meta.csv')
+ECNES_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta.csv')
 
 # Create an empty array to store the data
 ECNES_arr = xr.DataArray(
@@ -947,7 +953,7 @@ ECNES_arr.coords['presence'] = ['LIKELY', 'LIKELY_AND_MAYBE']
 # Save to nc, chunked by species
 ECNES_arr.name = 'data'
 ECNES_arr.to_netcdf(
-    f'{bio_DCCEEW_dir}/bio_DCCEEW_ECNES.nc', 
+    f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES.nc', 
     mode='w', 
     encoding={'data': {
         "compression": "gzip", 
@@ -960,6 +966,9 @@ ECNES_arr.to_netcdf(
 
 
 # ------------------- Calculate the biodiversity score for ECNES  ------------------------------------------
+
+ECNES_arr = xr.open_dataarray(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES.nc', chunks={'species': 1, 'presence': 1})
+
 
 def get_area(arr):
     score_area_weighted_all_Australia = arr * zones['CELL_HA'].values
@@ -998,6 +1007,7 @@ ECNES_meta_att = ECNES_meta_att.drop(columns=['PRES_RANK', 'SHAPE_Length', 'SHAP
 # Save the inside/outside LUTO data to csv
 ECNES_df = ECNES_in_out_LUTO_area.copy().reset_index()
 ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA'] = ECNES_df['ALL_HA']
+ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_INSIDE_LUTO_NATURAL'] = ECNES_df['IN_LUTO_HA']
 ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL'] = ECNES_df['NATURAL_OUT_LUTO_HA']
 ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = ECNES_df['IN_LUTO_HA'] + ECNES_df['NATURAL_OUT_LUTO_HA']
 ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_PERCENT'] = ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] / ECNES_df['ALL_HA'] * 100
@@ -1043,13 +1053,16 @@ cols = ['COMMUNITY',
         
         'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY',
         'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY',
+        'HABITAT_SIGNIFICANCE_BASELINE_INSIDE_LUTO_NATURAL_LIKELY',
+        
         'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY_MAYBE',
         'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY_MAYBE',
+        'HABITAT_SIGNIFICANCE_BASELINE_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
         
         'CATEGORY', 'COM_ID','EPBC', 'EXTRACTED', 'CELL_SIZE', 'REGIONS', 'CITATION', 'SPRAT']
 
 ECNES_df = ECNES_df[cols]
-ECNES_df.to_csv(f'{bio_DCCEEW_dir}/bio_DCCEEW_ECNES_target.csv', index=False)
+ECNES_df.to_csv(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES_target.csv', index=False)
 
 
 

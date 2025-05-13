@@ -575,6 +575,38 @@ print('Number of NaNs =', cell_df[cell_df.isna().any(axis = 1)].shape[0])
 
 
 
+################################ Read Human Induced Reduction (HIR) shapefile in to GeoPandas GeoDataFrame, convert to raster to match NLUM, save, join to cell_df dataframe
+
+cell_df = pd.read_hdf(cell_df_path + cell_df_fn + '.h5', key = cell_df_fn, mode = 'r')
+
+# Import shapefile to GeoPandas DataFrame
+HIR_gdf = gpd.read_file('N:/Data-Master/HIR/Outback_2p_GDA94/Outback_2p_GDA94.shp')
+
+# Access geometry and field to rasterise
+shapes = [(geom, 1) for geom in HIR_gdf.geometry]
+
+# Open a new GeoTiFF file
+with rasterio.open('N:/Data-Master/HIR/Outback_2p_GDA94/Outback_2p_GDA94_raster_filled.tif', 'w+', dtype = 'int8', **meta) as out:
+    # Rasterise HIR shapefile
+    newrast = features.rasterize(shapes = shapes, fill = 0, out = out.read(1), transform = out.transform)
+    # Fill continental land within Australia with -1
+    HIR_raster_clipped = np.where(NLUM_mask, newrast, -1)
+    # Save output to GeoTiff
+    out.write_band(1, HIR_raster_clipped)
+    
+    
+# Flatten the HIR 2D array to 1D array of valid values only, add HIR_MASK to cell_df dataframe
+cell_df['HIR_MASK'] = HIR_raster_clipped[NLUM_mask]
+cell_df['HIR_MASK'] = pd.to_numeric(cell_df['HIR_MASK'], downcast = 'integer').astype(np.bool_)
+
+# Plot and print out data, check that there are no NaNs
+print('Number of grid cells =', cell_df.shape[0])
+print('Number of NaNs =', cell_df[cell_df.isna().any(axis = 1)].shape[0])
+
+
+
+
+
 
 ################################ Read BOM GeoFabric HR Regions River Regions Geodatabase file in to GeoPandas GeoDataFrame, convert to raster to match NLUM, save, join to cell_df dataframe
     
