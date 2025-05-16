@@ -1,4 +1,5 @@
 import os, re
+import subprocess
 import netCDF4
 import rasterio, fiona
 import xarray as xr
@@ -565,20 +566,42 @@ presence_dict = {1: 'MAYBE', 2: 'LIKELY'}
 
 
 # Read the SNES biodiversity data; dissolve the data by 'SCIENTIFIC_NAME'
-if os.path.exists(f"{SNES_ECNES_dir}/Processed/snes_dissolve.gpkg"):
-    snes_dissolve = gpd.read_file(f"{SNES_ECNES_dir}/Processed/snes_dissolve.gpkg")
-else:
+if not os.path.exists(f"{SNES_ECNES_dir}/Processed/snes_dissolve.gpkg"):
     snes = gpd.read_file(f"{SNES_ECNES_dir}/SNES_version_6 March 2025/snes_public_gdb.gdb", driver="OpenFileGDB", layer="SNES_Public")
     snes_dissolve = snes.dissolve(by=['SCIENTIFIC_NAME','PRESENCE_CATEGORY']).reset_index()
     snes_dissolve.to_file(f"{SNES_ECNES_dir}/Processed/snes_dissolve.gpkg")
-
-# Read the ECNES biodiversity data; dissolve the data by 'COMMUNITY'   
-if os.path.exists(f"{SNES_ECNES_dir}/Processed/ecnes_dissolve.gpkg"):
-    ecnes_dissolve = gpd.read_file(f"{SNES_ECNES_dir}/Processed/ecnes_dissolve.gpkg")
 else:
+    snes_dissolve = gpd.read_file(f"{SNES_ECNES_dir}/Processed/snes_dissolve.gpkg")
+    
+# Read the ECNES biodiversity data; dissolve the data by 'COMMUNITY'   
+if not os.path.exists(f"{SNES_ECNES_dir}/Processed/ecnes_dissolve.gpkg"):
     ecnes = gpd.read_file(f"{SNES_ECNES_dir}/ECNES_versoin_4 September 2024/ECnes_public_gdb.gdb", driver="OpenFileGDB", layer="ECnes_public")
     ecnes_dissolve = ecnes.dissolve(by=['COMMUNITY', 'CATEGORY']).reset_index()
     ecnes_dissolve.to_file(f"{SNES_ECNES_dir}/Processed/ecnes_dissolve.gpkg")
+else:
+    ecnes_dissolve = gpd.read_file(f"{SNES_ECNES_dir}/Processed/ecnes_dissolve.gpkg")
+    
+    
+    
+    
+# Filter the data to include only the species that are significant for the LUTO study area
+snes_filter = '''
+    MARINE.isna() 
+    and ( 
+        THREATENED_STATUS.isin(["Critically Endangered", "Vulnerable", "Endangered", "Extinct in the wild"])
+        or MIGRATORY_STATUS == "Migratory"
+    )
+'''.replace('\n', ' ')
+
+ecnes_filter = '''
+    EPBC.isin(["Critically Endangered",  "Endangered"])
+'''.replace('\n', ' ')
+
+snes_dissolve = snes_dissolve.query(snes_filter)
+ecnes_dissolve = ecnes_dissolve.query(ecnes_filter)
+
+
+
 
 
 def get_presense_and_save_path(row):
@@ -768,6 +791,84 @@ ecnes_meta_merged = ecnes_meta_merged.groupby(['COMMUNITY']).aggregate('first').
 ecnes_meta_merged = ecnes_meta_merged.drop(columns=['PRES_RANK', 'CATEGORY', 'SHAPE_Length', 'SHAPE_Area', 'TIF_PATH'])
 ecnes_meta_merged = ecnes_meta_merged.merge(save_paths, on='COM_ID')
 ecnes_meta_merged.to_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta_merged.csv', index=False)
+
+
+
+
+# ------------------- Apply Zonation algorithm to merged data ------------------------------------------
+
+zonation_exe = f'C:/Program Files (x86)/Zonation5/z5.exe'
+snes_merged_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta_merged.csv')['TIF_PATH'].values
+ecnes_merged_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta_merged.csv')['TIF_PATH'].values
+
+
+# Save the TIF path to txt files
+with open(f'{SNES_ECNES_dir}/Processed/Zonation/SNES_files.txt', 'w') as f_snes,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_files.txt', 'w') as f_ecnes:
+    f_snes.write('filename\n')
+    f_snes.write('\n'.join(snes_merged_tifs))
+    f_ecnes.write('filename\n')
+    f_ecnes.write('\n'.join(ecnes_merged_tifs))
+    
+    
+# Create mask and hierarchy TIF
+with rasterio.open(snes_merged_tifs[0]) as src:
+    meta = src.meta.copy()
+    meta.update({
+        'dtype': 'uint8',
+        'nodata': 0,
+        'compress': 'lzw',
+        'count': 1,
+        'width': NLUM.rio.width,
+        'height': NLUM.rio.height,
+        'transform': NLUM.rio.transform(),
+    })
+    
+    zone_mask = NLUM.values.astype('uint8')
+    zone_hierarchy = ((zone_mask == 1) * (idx_in_LUTO_2D == 0)).astype('uint8')
+    
+    with rasterio.open(f'{SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif', 'w', **meta) as zone_hierarchy_dst,\
+         rasterio.open(f'{SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif', 'w', **meta) as zone_mask_dst:
+        zone_hierarchy_dst.write(zone_hierarchy, 1)
+        zone_mask_dst.write(zone_mask, 1)
+
+
+# Create the zonation settings file
+with open(f'{SNES_ECNES_dir}/Processed/Zonation/snes_settings.txt', 'w') as snes_settings,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_settings.txt', 'w') as ecnes_settings:
+         
+    snes_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/SNES_files.txt
+    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
+    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
+    '''.replace('    ', ''))
+    
+    ecnes_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/ECNES_files.txt
+    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
+    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
+    '''.replace('    ', ''))
+
+  
+
+# Execute zonation
+subprocess.run([
+    zonation_exe,
+    '--mode=CAZMAX', 
+    '-ah',
+    f'{SNES_ECNES_dir}/Processed/Zonation/snes_settings.txt',
+    f'{SNES_ECNES_dir}/Processed/Zonation/SNES_Priority' 
+])
+
+subprocess.run([
+    zonation_exe,
+    '--mode=CAZMAX',
+    '-ah',
+    f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_settings.txt',
+    f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_Priority'
+])
+
+
+
+
 
 
 

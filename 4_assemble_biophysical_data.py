@@ -862,7 +862,7 @@ HCAS_path = "N:/Data-Master/Habitat_condition_assessment_system/Data"
 percentiles =[10, 25, 50, 75, 90]
 
 with rasterio.Env(CPL_DEBUG=False):
-    with rasterio.open(f'{HCAS_path}/HCAS_v3.1/processed/HCAS31_HCB_1988_2022.tif') as HCAS_src:
+    with rasterio.open(f'{HCAS_path}/HCAS_v3.1/1.HABITAT_CONDITION/HCAS31_HCB_1988_2022.tif') as HCAS_src:
         
         # Read the HCAS data
         HCAS_arr = HCAS_src.read(1)
