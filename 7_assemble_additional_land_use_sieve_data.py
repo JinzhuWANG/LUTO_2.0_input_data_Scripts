@@ -130,7 +130,7 @@ year_file = "N://Planet-A//LUF-Modelling//LUTO2.0_Reporting//Data//year_concorda
 year_dataFrame = pd.read_csv(year_file)
 yearlist = sorted(year_dataFrame["YEAR"].to_list())
 
-all_biodiversity_ssp126_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/all/GeoTiffs/Biodiversity-all_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
+all_biodiversity_ssp126_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/all/GeoTiffs/Biodiversity-all_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
 
 baseYear = yearlist.index(1990)+1
 with rasterio.open(all_biodiversity_ssp126_2100_file) as src:
@@ -142,7 +142,7 @@ with rasterio.open(all_biodiversity_ssp126_2100_file) as src:
     cell_lu_sieve_df['BIODIV_HIST_1990'] = cell_lu_sieve_df['BIODIV_HIST_1990'].replace({-9999.0: 0})    
 
 
-all_biodiversity_ssp126_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/all/GeoTiffs/Biodiversity-all_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
+all_biodiversity_ssp126_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/all/GeoTiffs/Biodiversity-all_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
 
 futureYear = yearlist.index(2030)+1
 with rasterio.open(all_biodiversity_ssp126_2100_file) as src:
@@ -163,7 +163,7 @@ with rasterio.open(all_biodiversity_ssp126_2100_file) as src:
     cell_lu_sieve_df['BIODIV_SSP126_2050'] = cell_lu_sieve_df['BIODIV_SSP126_2050'].replace({-9999.0: 0})    
     
 
-all_biodiversity_ssp245_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/all/GeoTiffs/Biodiversity-all_ssp245_1970-2100_AUS_1km_ConditionYearly.tif"
+all_biodiversity_ssp245_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/all/GeoTiffs/Biodiversity-all_ssp245_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(all_biodiversity_ssp245_2100_file) as src:
@@ -184,7 +184,7 @@ with rasterio.open(all_biodiversity_ssp245_2100_file) as src:
     cell_lu_sieve_df['BIODIV_SSP245_2050'] = cell_lu_sieve_df['BIODIV_SSP245_2050'].replace({-9999.0: 0})    
 
 
-all_biodiversity_ssp370_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/all/GeoTiffs/Biodiversity-all_ssp370_1970-2100_AUS_1km_ConditionYearly.tif"
+all_biodiversity_ssp370_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/all/GeoTiffs/Biodiversity-all_ssp370_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(all_biodiversity_ssp370_2100_file) as src:
@@ -205,7 +205,7 @@ with rasterio.open(all_biodiversity_ssp370_2100_file) as src:
     cell_lu_sieve_df['BIODIV_SSP370_2050'] = cell_lu_sieve_df['BIODIV_SSP370_2050'].replace({-9999.0: 0})    
 
 
-all_biodiversity_ssp585_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/all/GeoTiffs/Biodiversity-all_ssp585_1970-2100_AUS_1km_ConditionYearly.tif"
+all_biodiversity_ssp585_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/all/GeoTiffs/Biodiversity-all_ssp585_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(all_biodiversity_ssp585_2100_file) as src:
@@ -227,7 +227,7 @@ with rasterio.open(all_biodiversity_ssp585_2100_file) as src:
 
 # Mammals groups
 
-ssp126_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/mammals/GeoTiffs/Biodiversity-mammals_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp126_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/mammals/GeoTiffs/Biodiversity-mammals_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
 
 baseYear = yearlist.index(1990)+1
 with rasterio.open(ssp126_2100_file) as src:
@@ -257,7 +257,7 @@ with rasterio.open(ssp126_2100_file) as src:
     cell_lu_sieve_df['MAMMALS_SSP126_2050'] = cell_lu_sieve_df['MAMMALS_SSP126_2050'].replace({-9999.0: 0})    
     
 
-ssp245_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/mammals/GeoTiffs/Biodiversity-mammals_ssp245_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp245_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/mammals/GeoTiffs/Biodiversity-mammals_ssp245_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp245_2100_file) as src:
@@ -278,7 +278,7 @@ with rasterio.open(ssp245_2100_file) as src:
     cell_lu_sieve_df['MAMMALS_SSP245_2050'] = cell_lu_sieve_df['MAMMALS_SSP245_2050'].replace({-9999.0: 0})    
 
 
-ssp370_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/mammals/GeoTiffs/Biodiversity-mammals_ssp370_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp370_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/mammals/GeoTiffs/Biodiversity-mammals_ssp370_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp370_2100_file) as src:
@@ -299,7 +299,7 @@ with rasterio.open(all_biodiversity_ssp370_2100_file) as src:
     cell_lu_sieve_df['MAMMALS_SSP370_2050'] = cell_lu_sieve_df['MAMMALS_SSP370_2050'].replace({-9999.0: 0})    
 
 
-ssp585_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/mammals/GeoTiffs/Biodiversity-mammals_ssp585_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp585_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/mammals/GeoTiffs/Biodiversity-mammals_ssp585_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp585_2100_file) as src:
@@ -321,7 +321,7 @@ with rasterio.open(all_biodiversity_ssp585_2100_file) as src:
 
 # Birds groups
 
-ssp126_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/birds/GeoTiffs/Biodiversity-birds_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp126_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/birds/GeoTiffs/Biodiversity-birds_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
 
 baseYear = yearlist.index(1990)+1
 with rasterio.open(ssp126_2100_file) as src:
@@ -351,7 +351,7 @@ with rasterio.open(ssp126_2100_file) as src:
     cell_lu_sieve_df['BIRDS_SSP126_2050'] = cell_lu_sieve_df['BIRDS_SSP126_2050'].replace({-9999.0: 0})    
     
 
-ssp245_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/birds/GeoTiffs/Biodiversity-birds_ssp245_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp245_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/birds/GeoTiffs/Biodiversity-birds_ssp245_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp245_2100_file) as src:
@@ -372,7 +372,7 @@ with rasterio.open(ssp245_2100_file) as src:
     cell_lu_sieve_df['BIRDS_SSP245_2050'] = cell_lu_sieve_df['BIRDS_SSP245_2050'].replace({-9999.0: 0})    
 
 
-ssp370_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/birds/GeoTiffs/Biodiversity-birds_ssp370_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp370_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/birds/GeoTiffs/Biodiversity-birds_ssp370_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp370_2100_file) as src:
@@ -393,7 +393,7 @@ with rasterio.open(all_biodiversity_ssp370_2100_file) as src:
     cell_lu_sieve_df['BIRDS_SSP370_2050'] = cell_lu_sieve_df['BIRDS_SSP370_2050'].replace({-9999.0: 0})    
 
 
-ssp585_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/birds/GeoTiffs/Biodiversity-birds_ssp585_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp585_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/birds/GeoTiffs/Biodiversity-birds_ssp585_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp585_2100_file) as src:
@@ -416,7 +416,7 @@ with rasterio.open(all_biodiversity_ssp585_2100_file) as src:
 
 # Reptiles groups
 
-ssp126_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/reptiles/GeoTiffs/Biodiversity-reptiles_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp126_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/reptiles/GeoTiffs/Biodiversity-reptiles_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
 
 baseYear = yearlist.index(1990)+1
 with rasterio.open(ssp126_2100_file) as src:
@@ -446,7 +446,7 @@ with rasterio.open(ssp126_2100_file) as src:
     cell_lu_sieve_df['REPTILES_SSP126_2050'] = cell_lu_sieve_df['REPTILES_SSP126_2050'].replace({-9999.0: 0})    
     
 
-ssp245_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/reptiles/GeoTiffs/Biodiversity-reptiles_ssp245_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp245_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/reptiles/GeoTiffs/Biodiversity-reptiles_ssp245_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp245_2100_file) as src:
@@ -467,7 +467,7 @@ with rasterio.open(ssp245_2100_file) as src:
     cell_lu_sieve_df['REPTILES_SSP245_2050'] = cell_lu_sieve_df['REPTILES_SSP245_2050'].replace({-9999.0: 0})    
 
 
-ssp370_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/reptiles/GeoTiffs/Biodiversity-reptiles_ssp370_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp370_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/reptiles/GeoTiffs/Biodiversity-reptiles_ssp370_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp370_2100_file) as src:
@@ -488,7 +488,7 @@ with rasterio.open(all_biodiversity_ssp370_2100_file) as src:
     cell_lu_sieve_df['REPTILES_SSP370_2050'] = cell_lu_sieve_df['REPTILES_SSP370_2050'].replace({-9999.0: 0})    
 
 
-ssp585_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/reptiles/GeoTiffs/Biodiversity-reptiles_ssp585_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp585_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/reptiles/GeoTiffs/Biodiversity-reptiles_ssp585_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp585_2100_file) as src:
@@ -511,7 +511,7 @@ with rasterio.open(all_biodiversity_ssp585_2100_file) as src:
 
 # Amphibians groups
 
-ssp126_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/amphibians/GeoTiffs/Biodiversity-amphibians_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp126_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/amphibians/GeoTiffs/Biodiversity-amphibians_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
 
 baseYear = yearlist.index(1990)+1
 with rasterio.open(ssp126_2100_file) as src:
@@ -541,7 +541,7 @@ with rasterio.open(ssp126_2100_file) as src:
     cell_lu_sieve_df['FROGS_SSP126_2050'] = cell_lu_sieve_df['FROGS_SSP126_2050'].replace({-9999.0: 0})    
     
 
-ssp245_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/amphibians/GeoTiffs/Biodiversity-amphibians_ssp245_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp245_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/amphibians/GeoTiffs/Biodiversity-amphibians_ssp245_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp245_2100_file) as src:
@@ -562,7 +562,7 @@ with rasterio.open(ssp245_2100_file) as src:
     cell_lu_sieve_df['FROGS_SSP245_2050'] = cell_lu_sieve_df['FROGS_SSP245_2050'].replace({-9999.0: 0})    
 
 
-ssp370_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/amphibians/GeoTiffs/Biodiversity-amphibians_ssp370_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp370_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/amphibians/GeoTiffs/Biodiversity-amphibians_ssp370_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp370_2100_file) as src:
@@ -583,7 +583,7 @@ with rasterio.open(all_biodiversity_ssp370_2100_file) as src:
     cell_lu_sieve_df['FROGS_SSP370_2050'] = cell_lu_sieve_df['FROGS_SSP370_2050'].replace({-9999.0: 0})    
 
 
-ssp585_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/amphibians/GeoTiffs/Biodiversity-amphibians_ssp585_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp585_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/amphibians/GeoTiffs/Biodiversity-amphibians_ssp585_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp585_2100_file) as src:
@@ -606,7 +606,7 @@ with rasterio.open(all_biodiversity_ssp585_2100_file) as src:
 
 # Plants groups
 
-ssp126_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/plants/GeoTiffs/Biodiversity-plants_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp126_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/plants/GeoTiffs/Biodiversity-plants_ssp126_1970-2100_AUS_1km_ConditionYearly.tif"
 
 baseYear = yearlist.index(1990)+1
 with rasterio.open(ssp126_2100_file) as src:
@@ -636,7 +636,7 @@ with rasterio.open(ssp126_2100_file) as src:
     cell_lu_sieve_df['PLANTS_SSP126_2050'] = cell_lu_sieve_df['PLANTS_SSP126_2050'].replace({-9999.0: 0})    
     
 
-ssp245_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/plants/GeoTiffs/Biodiversity-plants_ssp245_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp245_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/plants/GeoTiffs/Biodiversity-plants_ssp245_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp245_2100_file) as src:
@@ -657,7 +657,7 @@ with rasterio.open(ssp245_2100_file) as src:
     cell_lu_sieve_df['PLANTS_SSP245_2050'] = cell_lu_sieve_df['PLANTS_SSP245_2050'].replace({-9999.0: 0})    
 
 
-ssp370_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/plants/GeoTiffs/Biodiversity-plants_ssp370_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp370_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/plants/GeoTiffs/Biodiversity-plants_ssp370_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp370_2100_file) as src:
@@ -678,7 +678,7 @@ with rasterio.open(all_biodiversity_ssp370_2100_file) as src:
     cell_lu_sieve_df['PLANTS_SSP370_2050'] = cell_lu_sieve_df['PLANTS_SSP370_2050'].replace({-9999.0: 0})    
 
 
-ssp585_2100_file = "N:/Planet-A/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/plants/GeoTiffs/Biodiversity-plants_ssp585_1970-2100_AUS_1km_ConditionYearly.tif"
+ssp585_2100_file = "N:/Data-Master/Biodiversity_priority_areas/Biodiversity/Annual-taxa-condition_yearly_interpolated_1970-2100_1km/plants/GeoTiffs/Biodiversity-plants_ssp585_1970-2100_AUS_1km_ConditionYearly.tif"
       
 futureYear = yearlist.index(2030)+1
 with rasterio.open(ssp585_2100_file) as src:

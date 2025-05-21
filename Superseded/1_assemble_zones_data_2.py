@@ -20,7 +20,7 @@ pd.set_option('display.float_format', '{:,.2f}'.format)
 infile = r'N:\Planet-A\Data-Master\National_Landuse_Map\NLUM_2010-11_clip.tif'
 outgpkg = r'N:\Planet-A\Data-Master\LUTO_2.0_input_data\spatial_data.gpkg'
 
-cell_df_path_pkl = 'N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.pkl'
+cell_df_path_pkl = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.pkl'
 
 # Read cell_df from disk
 cell_df = pd.read_pickle(cell_df_path_pkl)
@@ -745,7 +745,7 @@ def join_AQUEDUCT():
     global cell_df
     
     # Read file from GeoPackage
-    AD_file = 'N:/Planet-A/Data-Master/Water/Aqueduct_3.0_V01/baseline/annual/y2019m07d11_aqueduct30_annual_v01.gpkg'
+    AD_file = 'N:/Data-Master/Water/Aqueduct_3.0_V01/baseline/annual/y2019m07d11_aqueduct30_annual_v01.gpkg'
     AD_gdf = gpd.read_file(AD_file, layer='y2019m07d11_aqueduct30_annual_v01')
     
     AD_gdf = AD_gdf[['geometry', 'bws_cat', 'bws_label']]
@@ -762,7 +762,7 @@ def join_AQUEDUCT():
     shapes = ((geom, value) for geom, value in zip(AD_gdf.geometry, AD_gdf.bws_cat)) 
     
     # Open a new GeoTiFF file
-    outfile = "N:/Planet-A/Data-Master/Water/Aqueduct_3.0_V01/baseline/annual/AD_BWS_CAT_raster_filled.tif"
+    outfile = "N:/Data-Master/Water/Aqueduct_3.0_V01/baseline/annual/AD_BWS_CAT_raster_filled.tif"
     
     with rasterio.open(outfile, 'w+', dtype='int32', nodata='0', **meta) as out:
         

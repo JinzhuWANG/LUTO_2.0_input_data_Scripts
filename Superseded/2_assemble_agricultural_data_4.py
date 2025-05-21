@@ -23,7 +23,7 @@ pd.set_option('display.max_rows', 5000)
 pd.set_option('display.float_format', '{:,.5f}'.format)
 
 # Open NLUM_ID as mask raster and get metadata
-with rasterio.open('N:/Planet-A/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as rst:
+with rasterio.open('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as rst:
     NLUM_mask = rst.read(1)
     
     # Get metadata and update parameters
@@ -73,22 +73,22 @@ def downcast(dframe):
 ############################################################################################################################################
 
 # Read cell_df file from disk to a new data frame for ag data with just the relevant columns
-cell_df = pd.read_pickle('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.pkl')
+cell_df = pd.read_pickle('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.pkl')
 cell_df = cell_df[['CELL_ID', 'X', 'Y', 'CELL_HA', 'SA2_ID', 'PRIMARY_V7', 'SECONDARY_V7', 'SPREAD_ID', 'SPREAD_DESC', 'IRRIGATION']] # 'COMMODITIES', 'COMMODITIES_DESC', 'IRRIGATION']]
 
 # Read in the PROFIT MAP table as provided by CSIRO to dataframe
-ag_df = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210621/T_pfe_per_product_21062021.csv', low_memory = False).drop(columns = 'rev_notes')
+ag_df = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210621/T_pfe_per_product_21062021.csv', low_memory = False).drop(columns = 'rev_notes')
 
 # Load livestock mapping data from CSIRO, drop some columns, downcast and save a lite version
-# lmap = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210720/lmap.csv', low_memory = False)
+# lmap = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210720/lmap.csv', low_memory = False)
 # lmap = lmap.drop(columns = ['Unnamed: 0', 'ha_dairy', 'ha_pixel', 'no_sheep', 'Beef Cattle', 'Dairy Cattle', 'Sheep', 'heads_mapped_cum', 'SPREAD_colour'])
 # downcast(lmap)
-# lmap.to_pickle('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210720/lmap.pkl')
-# lmap.to_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210720/lmap_lite.csv')
-lmap = pd.read_pickle('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210720/lmap.pkl')
+# lmap.to_pickle('N:/Data-Master/Profit_map/From_CSIRO/20210720/lmap.pkl')
+# lmap.to_csv('N:/Data-Master/Profit_map/From_CSIRO/20210720/lmap_lite.csv')
+lmap = pd.read_pickle('N:/Data-Master/Profit_map/From_CSIRO/20210720/lmap.pkl')
 
-# Load column names and descriptions: N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210720/lmap_variable_names_description.docx
-# lmap_cols = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/lmap_column_names.csv')
+# Load column names and descriptions: N:/Data-Master/Profit_map/From_CSIRO/20210720/lmap_variable_names_description.docx
+# lmap_cols = pd.read_csv('N:/Data-Master/Profit_map/lmap_column_names.csv')
 
 
 
@@ -133,7 +133,7 @@ downcast(ludf)
 
 # Export to HDF5 file
 tmp_df = ludf[['CELL_ID', 'X', 'Y', 'CELL_HA', 'SA2_ID', 'PRIMARY_V7', 'SECONDARY_V7', 'SPREAD_ID', 'SPREAD_DESC', 'IRRIGATION', 'LU_ID', 'LU_DESC']]
-tmp_df.to_hdf('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', key = 'cell_LU_mapping', mode = 'w', format = 't')
+tmp_df.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', key = 'cell_LU_mapping', mode = 'w', format = 't')
 
 
 
@@ -143,10 +143,10 @@ tmp_df.to_hdf('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial
 ############################################################################################################################################
 
 # Load raw Aussiegrass 0.05 degree resolution data and save the output to GeoTiff with corrected nodata value
-with rasterio.open('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210720/avg_growth11/avg_growth11.tif') as src:
+with rasterio.open('N:/Data-Master/Profit_map/From_CSIRO/20210720/avg_growth11/avg_growth11.tif') as src:
     meta5k = src.meta.copy()
     meta5k.update(compress = 'lzw', driver = 'GTiff', nodata = 0)
-    with rasterio.open('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210720/avg_growth11/avg_growth11_nodata_fixed.tif', 'w+', **meta5k) as dst:        
+    with rasterio.open('N:/Data-Master/Profit_map/From_CSIRO/20210720/avg_growth11/avg_growth11_nodata_fixed.tif', 'w+', **meta5k) as dst:        
         dst.write_band(1, src.read(1))
         
         # Create a destination array
@@ -160,7 +160,7 @@ with rasterio.open('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210720/avg_g
         dst_array_filled = np.where(NLUM_mask == 1, fillnodata(dst_array, fill_mask, max_search_distance = 200.0), -9999)
         
         # Save the output to GeoTiff
-        with rasterio.open('N:/Planet-A/Data-Master/Profit_map/PASTURE_KG_DM_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+        with rasterio.open('N:/Data-Master/Profit_map/PASTURE_KG_DM_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
             dst.write_band(1, dst_array_filled)
         
         # Flatten 2D array to 1D array of valid values only and add data to cell_df dataframe
@@ -168,7 +168,7 @@ with rasterio.open('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210720/avg_g
 
 
 # Load 0.01 degree resolution resampled data that Javi used and save the output to GeoTiff for comparison
-with rasterio.open('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210720/AussieGrass/avggrowth1k.tif') as src:
+with rasterio.open('N:/Data-Master/Profit_map/From_CSIRO/20210720/AussieGrass/avggrowth1k.tif') as src:
         
         # Create a destination array
         dst_array = np.zeros((meta.get('height'), meta.get('width')), np.float32)
@@ -181,7 +181,7 @@ with rasterio.open('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210720/Aussi
         dst_array_filled = np.where(NLUM_mask == 1, fillnodata(dst_array, fill_mask, max_search_distance = 200.0), -9999)
         
         # Save the output to GeoTiff
-        with rasterio.open('N:/Planet-A/Data-Master/Profit_map/PASTURE_KG_DM_HA_JAVI.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
+        with rasterio.open('N:/Data-Master/Profit_map/PASTURE_KG_DM_HA_JAVI.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
             dst.write_band(1, dst_array_filled)
         
         # Flatten 2D array to 1D array of valid values only and add data to cell_df dataframe
@@ -551,8 +551,8 @@ print('Number of NaNs =', crops_sum_df[crops_sum_df.isna().any(axis=1)].shape[0]
 downcast(crops_sum_df)
 
 # Save file
-crops_sum_df.to_csv('N:/Planet-A/Data-Master/Profit_map/crop_yield_econ_water_SPREAD.csv')
-crops_sum_df.to_hdf('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/crop_data_SPREAD.h5', key = 'crop_yield_econ_water_SPREAD', mode = 'w', format = 't')
+crops_sum_df.to_csv('N:/Data-Master/Profit_map/crop_yield_econ_water_SPREAD.csv')
+crops_sum_df.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/crop_data_SPREAD.h5', key = 'crop_yield_econ_water_SPREAD', mode = 'w', format = 't')
 
 # Join the table to the cell_df dataframe and drop uneccesary columns
 adf = cell_df.merge(crops_sum_df, how = 'left', left_on = ['SA2_ID', 'SPREAD_ID', 'IRRIGATION'], right_on = ['SA2_ID', 'SPREAD_ID', 'Irrigation']) 
@@ -607,8 +607,8 @@ cep_df.drop(columns = 'index')
 downcast(cep_df)
 
 # Save file
-cep_df.to_csv('N:/Planet-A/Data-Master/Profit_map/cep_yield_econ_SPREAD.csv')
-cep_df.to_hdf('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cep_yield_econ_SPREAD.h5', key = 'cep_yield_econ_SPREAD', mode = 'w', format = 't')
+cep_df.to_csv('N:/Data-Master/Profit_map/cep_yield_econ_SPREAD.csv')
+cep_df.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cep_yield_econ_SPREAD.h5', key = 'cep_yield_econ_SPREAD', mode = 'w', format = 't')
 
 
 
@@ -623,7 +623,7 @@ cep_df.to_hdf('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial
 ################################ Join EMISSIONS table
 
 # Read in the CROPS EMISSIONS table, join to cell_df, and drop unwanted columns
-CO2 = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210603/T_emissions_by_SPREAD_SA2_crops.csv')
+CO2 = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210603/T_emissions_by_SPREAD_SA2_crops.csv')
 tmp = crops_sum_df.merge(CO2, how = 'left', left_on = ['SA2_ID', 'SPREAD_ID', 'Irrigation'], right_on = ['sa2_id', 'spread_id', 'irrigation']).drop(columns = ['Area_ABS', 'Prod_ABS', 'Yield', 'P1', 'AC', 'QC', 'FDC', 'FLC', 'FOC', 'WR', 'WP'])
 print('Number of NaNs =', tmp[tmp.isna().any(axis=1)].shape[0])
 
@@ -652,7 +652,7 @@ print('Number of NaNs =', tmp[tmp.isna().any(axis=1)].shape[0])
 ################################ Join Fertilizer table 
 
 # Read in the Fertilizer table
-NPKS = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210603/T_NPKS_by_SPREAD_SA2.csv')
+NPKS = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210603/T_NPKS_by_SPREAD_SA2.csv')
 tmp = crops_sum_df.merge(NPKS, how = 'left', left_on = ['SA2_ID', 'SPREAD_ID', 'Irrigation'], right_on = ['sa2_id', 'SPREAD_ID', 'irrigation']).drop(columns = ['Area_ABS', 'Prod_ABS', 'Yield', 'P1', 'AC', 'QC', 'FDC', 'FLC', 'FOC', 'WR', 'WP'])
 print('Number of NaNs =', tmp[tmp.isna().any(axis=1)].shape[0])
 
@@ -661,7 +661,7 @@ print('Number of NaNs =', tmp[tmp.isna().any(axis=1)].shape[0])
 
 # =============================================================================
 # Read in the TOXICITY table
-TOX = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210603/T_USETOX_CFvalue_by_SPREAD_SA2_wide.csv')
+TOX = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210603/T_USETOX_CFvalue_by_SPREAD_SA2_wide.csv')
 tmp = crops_sum_df.merge(TOX, how = 'left', left_on = ['SA2_ID', 'SPREAD_ID', 'Irrigation'], right_on = ['SA211_id', 'SPREAD_ID', 'irrigation']).drop(columns = ['Area_ABS', 'Prod_ABS', 'Yield', 'P1', 'AC', 'QC', 'FDC', 'FLC', 'FOC', 'WR', 'WP'])
 print('Number of NaNs =', tmp[tmp.isna().any(axis=1)].shape[0])
 

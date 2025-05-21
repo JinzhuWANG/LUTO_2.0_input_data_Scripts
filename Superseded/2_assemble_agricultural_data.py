@@ -18,7 +18,7 @@ outgpkg = r'N:\Planet-A\Data-Master\Profit_map\vector_spatial_data.gpkg'
 
 
 # Set file path
-in_cell_df_path = 'N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.pkl'
+in_cell_df_path = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.pkl'
  
 # Read cell_df file from disk to a new data frame for ag data with just the relevant columns
 cell_df = pd.read_pickle(in_cell_df_path)[['CELL_ID', 'CELL_HA', 'SA2_ID', 'COMMODITIES', 'COMMODITIES_DESC', 'IRRIGATION']]
@@ -72,7 +72,7 @@ def downcast(dframe):
 
 # =============================================================================
 # Read in the PROFIT MAP table as provided by CSIRO to dataframe
-ag_df = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/T_pfe_per_product_07052021.csv')
+ag_df = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/T_pfe_per_product_07052021.csv')
 
 # Rename columns to avoid python built-in naming
 ag_df.rename(columns = {'yield': 'Yield', 
@@ -125,9 +125,9 @@ ag_sum_df = ag_df.groupby(['SA2_ID', 'SPREAD_ID', 'SPREAD_ID_original', 'Irrigat
 ag_sum_df.sort_values(by = ['SA2_ID', 'SPREAD_ID', 'SPREAD_ID_original', 'Irrigation'], ascending = True, inplace = True)
 
 # Save file
-# ag_sum_df.to_csv('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.csv')
-# ag_sum_df.to_pickle('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.pkl')
-ag_sum_df.to_hdf('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.h5', key = 'SPREAD_aggregated', mode = 'w')
+# ag_sum_df.to_csv('N:/Data-Master/Profit_map/SPREAD_aggregated.csv')
+# ag_sum_df.to_pickle('N:/Data-Master/Profit_map/SPREAD_aggregated.pkl')
+ag_sum_df.to_hdf('N:/Data-Master/Profit_map/SPREAD_aggregated.h5', key = 'SPREAD_aggregated', mode = 'w')
 
 # Calculate revenue and costs
 ag_sum_df['Revenue'] = ag_sum_df.eval('(Production / Area) * Prod_factor * ((F1 * Q1 * P1) + (F2 * Q2 * P2) + (F3 * Q3 * P3))')
@@ -216,7 +216,7 @@ cell_df.groupby(['PROT_AREAS'], as_index=False)[['PROT_AREAS_DESC']].first().sor
 
 
 # Read in the profit map table to dataframe
-javi = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/T_pfe_per_product_07052021.csv')
+javi = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/T_pfe_per_product_07052021.csv')
 javi.rename(columns={'yield': 'Yield', 'prod': 'Production', 'irrig_factor': 'Prod_factor'}, inplace = True)
 
 javi.info()
@@ -280,8 +280,8 @@ j.sort_values(by=['SA2_ID', 'SPREAD_ID', 'SPREAD_ID_original', 'irrigation'], as
 cols = list(range(1, 5)) + list(range(-5, -1))
 j[j.columns[cols]]
 
-j.to_csv('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.csv')
-j.to_pickle('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.pkl')
+j.to_csv('N:/Data-Master/Profit_map/SPREAD_aggregated.csv')
+j.to_pickle('N:/Data-Master/Profit_map/SPREAD_aggregated.pkl')
 
 
 adf.loc[adf.duplicated(subset=['CELL_ID']), ('CELL_ID', 'CELL_HA', 'SA2_ID', 'COMMODITIES', 'COMMODITIES_DESC', 'IRRIGATION', 'SPREAD_ID', 'SPREAD_ID_original', 'Irrigation', 'SA2_Name', 'SPREAD_Name', 'Production', 'Area', 'Prod_factor', 'Yield')]

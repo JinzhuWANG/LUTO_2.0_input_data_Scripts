@@ -9,11 +9,11 @@ years = ['2021-2040', '2041-2060', '2061-2080', '2081-2100']
 layers = ['prec', 'tavg']
 
 # Set some paths to input and output data
-inannpth = 'N:/Planet-A/Data-Master/WorldClim_CMIP6/Australia/Australia_1km_masked/Annual_climate_layers/'
-outyrlypth = 'N:/Planet-A/Data-Master/WorldClim_CMIP6/Australia/Australia_1km_masked/Yearly_climate_layers_1970-2100/'
+inannpth = 'N:/Data-Master/WorldClim_CMIP6/Australia/Australia_1km_masked/Annual_climate_layers/'
+outyrlypth = 'N:/Data-Master/WorldClim_CMIP6/Australia/Australia_1km_masked/Yearly_climate_layers_1970-2100/'
 
 # Open NLUM mask raster and get metadata
-with rasterio.open('N:/Planet-A/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as src:
+with rasterio.open('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as src:
     NLUM_mask = src.read(1) == 1
 
     # Get metadata and update parameters
@@ -63,7 +63,7 @@ for gcm in gcms:
             
             dc_full_timeseries = linfit(list(range(1970, 2101, 1))).astype(np.float32)
             
-            fn = 'N:/Planet-A/Data-Master/Climate_damage/Climate_projection_data/wc2.1_2.5m_' + layer + '_' + gcm + '_' + ssp + '_2010-2100.tif'
+            fn = 'N:/Data-Master/Climate_damage/Climate_projection_data/wc2.1_2.5m_' + layer + '_' + gcm + '_' + ssp + '_2010-2100.tif'
             np.save(fn, dc_full_timeseries[:, 40:])
             
             for i in range(dc_full_timeseries.shape[1]):

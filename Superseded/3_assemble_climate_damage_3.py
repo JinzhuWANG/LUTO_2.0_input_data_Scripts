@@ -10,12 +10,12 @@ gcms = ['GCM_ensembles']# , 'BCC-CSM2-MR', 'CanESM5', 'CNRM-CM6-1', 'CNRM-ESM2-1
 ssps = ['ssp126']#, 'ssp245', 'ssp370', 'ssp585']
 
 # Set paths to input and output data folders
-in_path = 'N:/Planet-A/Data-Master/Climate_damage/Climate_projection_data/'
-out_path = 'N:/Planet-A/Data-Master/Climate_damage/Climate_damage_crops/'
-LUTO_data_path = 'N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/Climate_damage_crops/'
+in_path = 'N:/Data-Master/Climate_damage/Climate_projection_data/'
+out_path = 'N:/Data-Master/Climate_damage/Climate_damage_crops/'
+LUTO_data_path = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/Climate_damage_crops/'
 
 # Open NLUM mask raster and get metadata
-with rasterio.open('N:/Planet-A/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as src:
+with rasterio.open('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as src:
     NLUM_mask = src.read(1)
     
     # Get metadata and update parameters (note: count = 91 indicates multibands rasters where each band is a year)
@@ -28,11 +28,11 @@ with rasterio.open('N:/Planet-A/Data-Master/National_Landuse_Map/NLUM_2010-11_ma
     xy = np.nonzero(NLUM_mask == 1)
 
 # Load CO2 data (Meinshausen et al.) and concatenate historical data (2010 - 2014) with projected data (2015 onwards)
-CO2_hist = pd.read_csv('N:/Planet-A/Data-Master/Climate_damage/CO2_downloads/mole-fraction-of-carbon-dioxide-in-air_input4MIPs_GHGConcentrations_CMIP_UoM-CMIP-1-2-0_gr1-GMNHSH_0000-2014.csv')
-CO2_ssp126_tmp = pd.read_csv('N:/Planet-A/Data-Master/Climate_damage/CO2_downloads/mole-fraction-of-carbon-dioxide-in-air_input4MIPs_GHGConcentrations_ScenarioMIP_UoM-IMAGE-ssp126-1-2-1_gr1-GMNHSH_2015-2500.csv')
-CO2_ssp245_tmp = pd.read_csv('N:/Planet-A/Data-Master/Climate_damage/CO2_downloads/mole-fraction-of-carbon-dioxide-in-air_input4MIPs_GHGConcentrations_ScenarioMIP_UoM-MESSAGE-GLOBIOM-ssp245-1-2-1_gr1-GMNHSH_2015-2500.csv')
-CO2_ssp370_tmp = pd.read_csv('N:/Planet-A/Data-Master/Climate_damage/CO2_downloads/mole-fraction-of-carbon-dioxide-in-air_input4MIPs_GHGConcentrations_ScenarioMIP_UoM-AIM-ssp370-1-2-1_gr1-GMNHSH_2015-2500.csv')
-CO2_ssp850_tmp = pd.read_csv('N:/Planet-A/Data-Master/Climate_damage/CO2_downloads/mole-fraction-of-carbon-dioxide-in-air_input4MIPs_GHGConcentrations_ScenarioMIP_UoM-REMIND-MAGPIE-ssp585-1-2-1_gr1-GMNHSH_2015-2500.csv')
+CO2_hist = pd.read_csv('N:/Data-Master/Climate_damage/CO2_downloads/mole-fraction-of-carbon-dioxide-in-air_input4MIPs_GHGConcentrations_CMIP_UoM-CMIP-1-2-0_gr1-GMNHSH_0000-2014.csv')
+CO2_ssp126_tmp = pd.read_csv('N:/Data-Master/Climate_damage/CO2_downloads/mole-fraction-of-carbon-dioxide-in-air_input4MIPs_GHGConcentrations_ScenarioMIP_UoM-IMAGE-ssp126-1-2-1_gr1-GMNHSH_2015-2500.csv')
+CO2_ssp245_tmp = pd.read_csv('N:/Data-Master/Climate_damage/CO2_downloads/mole-fraction-of-carbon-dioxide-in-air_input4MIPs_GHGConcentrations_ScenarioMIP_UoM-MESSAGE-GLOBIOM-ssp245-1-2-1_gr1-GMNHSH_2015-2500.csv')
+CO2_ssp370_tmp = pd.read_csv('N:/Data-Master/Climate_damage/CO2_downloads/mole-fraction-of-carbon-dioxide-in-air_input4MIPs_GHGConcentrations_ScenarioMIP_UoM-AIM-ssp370-1-2-1_gr1-GMNHSH_2015-2500.csv')
+CO2_ssp850_tmp = pd.read_csv('N:/Data-Master/Climate_damage/CO2_downloads/mole-fraction-of-carbon-dioxide-in-air_input4MIPs_GHGConcentrations_ScenarioMIP_UoM-REMIND-MAGPIE-ssp585-1-2-1_gr1-GMNHSH_2015-2500.csv')
 
 CO2_df = CO2_hist.loc[CO2_hist['year'] >= 2010, ['year', 'data_mean_sh']].reset_index(drop = True)
 CO2_ssp126 = CO2_ssp126_tmp.loc[(CO2_ssp126_tmp['year'] >= 2015) & (CO2_ssp126_tmp['year'] <= 2100), ['year', 'data_mean_sh']].reset_index(drop = True)

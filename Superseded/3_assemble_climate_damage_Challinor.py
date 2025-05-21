@@ -15,7 +15,7 @@ from itertools import product
 # Calculates CO2 trajectories
 def assemble_CO2_data():
 
-    in_CO2_path = 'N:/Planet-A/Data-Master/Climate_damage/CO2_downloads/'
+    in_CO2_path = 'N:/Data-Master/Climate_damage/CO2_downloads/'
 
     # Load CO2 data (Meinshausen et al.) and concatenate historical data (2010 - 2014) with projected data (2015 onwards)
     CO2_hist = pd.read_csv(in_CO2_path + 'mole-fraction-of-carbon-dioxide-in-air_input4MIPs_GHGConcentrations_CMIP_UoM-CMIP-1-2-0_gr1-GMNHSH_0000-2014.csv')
@@ -56,17 +56,17 @@ def calc_crop_damage_for_GCMs(gcm):
     ssps = ['ssp126', 'ssp245', 'ssp370', 'ssp585']
     
     # Set paths to input and output data folders
-    in_CO2_path = 'N:/Planet-A/Data-Master/Climate_damage/CO2_downloads/'
-    in_path = 'N:/Planet-A/Data-Master/WorldClim_CMIP6/Australia/Australia_1km/Annual_yearly_interpolated_1970-2100/HDF5/'
-    out_path_gtif = 'N:/Planet-A/Data-Master/Climate_damage/Climate_damage_crops/'
-    out_path_deltas = 'N:/Planet-A/Data-Master/Climate_damage/Climate_deltas/'
-    out_path = 'N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/'
+    in_CO2_path = 'N:/Data-Master/Climate_damage/CO2_downloads/'
+    in_path = 'N:/Data-Master/WorldClim_CMIP6/Australia/Australia_1km/Annual_yearly_interpolated_1970-2100/HDF5/'
+    out_path_gtif = 'N:/Data-Master/Climate_damage/Climate_damage_crops/'
+    out_path_deltas = 'N:/Data-Master/Climate_damage/Climate_deltas/'
+    out_path = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/'
     
     os.makedirs(out_path_gtif, exist_ok = True)
     os.makedirs(out_path_deltas, exist_ok = True)
     
     # Open NLUM mask raster and get metadata
-    with rasterio.open('N:/Planet-A/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as src:
+    with rasterio.open('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as src:
         NLUM_mask = src.read(1)
         
         # Get metadata and update parameters (note: count = 91 indicates multibands rasters where each band is a year)
@@ -150,9 +150,9 @@ def calc_crop_damage_for_GCMs(gcm):
 def simulate_yield_damage_uncertainty(ssp):
     
     # Set paths to input and output data folders
-    in_CO2_path = 'N:/Planet-A/Data-Master/Climate_damage/CO2_downloads/'
-    in_path = 'N:/Planet-A/Data-Master/WorldClim_CMIP6/Australia/Australia_1km/Annual_yearly_interpolated_1970-2100/HDF5/'
-    out_path = 'N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/'
+    in_CO2_path = 'N:/Data-Master/Climate_damage/CO2_downloads/'
+    in_path = 'N:/Data-Master/WorldClim_CMIP6/Australia/Australia_1km/Annual_yearly_interpolated_1970-2100/HDF5/'
+    out_path = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/'
     sims_path = 'D:/bbrett/'
     
     # Load CO2 data
@@ -209,13 +209,13 @@ def simulate_yield_damage_uncertainty(ssp):
 def calc_high_and_low_estimates():
     
     ssps = ['ssp126', 'ssp245', 'ssp370', 'ssp585']
-    out_path = 'N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/'
-    out_path_gtif = 'N:/Planet-A/Data-Master/Climate_damage/Climate_damage_crops/'
+    out_path = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/'
+    out_path_gtif = 'N:/Data-Master/Climate_damage/Climate_damage_crops/'
     sims_path = 'D:/bbrett/'
     nsims = 100
 
     # Open NLUM mask raster and get metadata
-    with rasterio.open('N:/Planet-A/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as src:
+    with rasterio.open('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as src:
         NLUM_mask = src.read(1)
         
         # Get metadata and update parameters (note: count = 91 indicates multibands rasters where each band is a year)
@@ -289,10 +289,10 @@ if __name__ == '__main__':
 
 """
 # Some code for plotting the original against the filtered data
-h1 = h5py.File('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/Climate_damage_crops_GCM-Ensembles_ssp585_2010-2100_low.h5', 'r')
+h1 = h5py.File('N:/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/Climate_damage_crops_GCM-Ensembles_ssp585_2010-2100_low.h5', 'r')
 h1a = h1['Climate_damage_crops_GCM-Ensembles_ssp585_2010-2100_low.h5'][()]
 
-h1 = h5py.File('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/Climate_damage_crops_GCM-Ensembles_ssp585_2010-2100_low.h5t', 'r')
+h1 = h5py.File('N:/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/Climate_damage_crops_GCM-Ensembles_ssp585_2010-2100_low.h5t', 'r')
 h1t = h1['Climate_damage_crops_GCM-Ensembles_ssp585_2010-2100_low.h5'][()]
 
 plt.plot(range(2010, 2101), h1a[11110, :], color='red', label = 'Filter')
@@ -306,7 +306,7 @@ def smooth_high_and_low_estimates(ssps_lhs):
     ssp = ssps_lhs[0]
     lh = ssps_lhs[1]
     
-    pth = 'N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/'
+    pth = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/'
     fn = 'Climate_damage_crops_GCM-Ensembles_' + ssp + '_2010-2100_' + lh + '.h5'
     
     with h5py.File(pth + fn, 'r') as h5:

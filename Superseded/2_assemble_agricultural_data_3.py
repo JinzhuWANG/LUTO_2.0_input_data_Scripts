@@ -18,12 +18,12 @@ outgpkg = r'N:\Planet-A\Data-Master\Profit_map\ag_spatial_data.gpkg'
 
 
 # Set file path
-in_cell_df_path = 'N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.pkl'
+in_cell_df_path = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.pkl'
  
 # Read cell_df file from disk to a new data frame for ag data with just the relevant columns
 cell_df = pd.read_pickle(in_cell_df_path)[['CELL_ID', 'X', 'Y', 'CELL_HA', 'SA2_ID', 'SPREAD_ID', 'SPREAD_DESC', 'IRRIGATION']] # 'COMMODITIES', 'COMMODITIES_DESC', 'IRRIGATION']]
 
-# cell_df = pd.read_csv('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.csv')
+# cell_df = pd.read_csv('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.csv')
 
 ################################ Open NLUM_ID as mask raster and get metadata, create some helper functions
 
@@ -73,7 +73,7 @@ def downcast(dframe):
 
 # =============================================================================
 # Read in the PROFIT MAP table as provided by CSIRO to dataframe
-ag_df = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210609/T_pfe_per_product_09062021.csv').drop(columns = 'rev_notes')
+ag_df = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210609/T_pfe_per_product_09062021.csv').drop(columns = 'rev_notes')
 
 # Select crops only
 crops_df = ag_df.query("SPREAD_ID >= 5 and SPREAD_ID <= 25")
@@ -126,9 +126,9 @@ crops_sum_df = crops_df.groupby(['SA2_ID', 'SPREAD_ID', 'SPREAD_ID_orig', 'Irrig
 crops_sum_df.sort_values(by = ['SA2_ID', 'SPREAD_ID', 'SPREAD_ID_orig', 'Irrigation'], ascending = True, inplace = True)
 
 # Save file
-# crops_sum_df.to_csv('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.csv')
-# crops_sum_df.to_pickle('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.pkl')
-# crops_sum_df.to_hdf('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.h5', key = 'SPREAD_aggregated', mode = 'w')
+# crops_sum_df.to_csv('N:/Data-Master/Profit_map/SPREAD_aggregated.csv')
+# crops_sum_df.to_pickle('N:/Data-Master/Profit_map/SPREAD_aggregated.pkl')
+# crops_sum_df.to_hdf('N:/Data-Master/Profit_map/SPREAD_aggregated.h5', key = 'SPREAD_aggregated', mode = 'w')
 
 # Calculate revenue and costs
 crops_sum_df.eval('Yield_ha_TRUE = Production / Area', inplace = True)
@@ -150,9 +150,9 @@ crops_sum_df[['SA2_ID', 'SA2_Name', 'SPREAD_ID', 'SPREAD_Name', 'Irrigation', 'Y
 downcast(cdf)
 
 # Save file
-# crops_sum_df.to_csv('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.csv')
-# crops_sum_df.to_pickle('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.pkl')
-# crops_sum_df.to_hdf('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.h5', key = 'SPREAD_aggregated', mode = 'w')
+# crops_sum_df.to_csv('N:/Data-Master/Profit_map/SPREAD_aggregated.csv')
+# crops_sum_df.to_pickle('N:/Data-Master/Profit_map/SPREAD_aggregated.pkl')
+# crops_sum_df.to_hdf('N:/Data-Master/Profit_map/SPREAD_aggregated.h5', key = 'SPREAD_aggregated', mode = 'w')
 
 # Join the table to the cell_df dataframe and drop uneccesary columns
 adf = cell_df.merge(cdf, how = 'left', left_on = ['SA2_ID', 'SPREAD_ID', 'IRRIGATION'], right_on = ['SA2_ID', 'SPREAD_ID', 'Irrigation']) 
@@ -167,7 +167,7 @@ x[x['SPREAD_ID'] > 0]
 
 x = crops_sum_df.groupby(['SA2_ID', 'SPREAD_Name', 'Irr'], as_index=False)[['Yield', 'Prod_factor']].first()
 
-err.to_csv('N:/Planet-A/Data-Master/Profit_map/errors.csv')
+err.to_csv('N:/Data-Master/Profit_map/errors.csv')
 
 crops_sum_df.groupby(['SPREAD_Name'], as_index = False).agg(
     Num_SA2s = ('SPREAD_Name', 'count'),
@@ -280,7 +280,7 @@ ag_df[(ag_df['area_ABS'] < 1) & (ag_df['SPREAD_ID'] <= 25) & (ag_df['SPREAD_ID']
 
 
 # Read in the profit map table to dataframe
-javi = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/T_pfe_per_product_07052021.csv')
+javi = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/T_pfe_per_product_07052021.csv')
 javi.rename(columns={'yield': 'Yield', 'prod': 'Production', 'irrig_factor': 'Prod_factor'}, inplace = True)
 
 javi.info()
@@ -347,8 +347,8 @@ j.sort_values(by=['SA2_ID', 'SPREAD_ID', 'SPREAD_ID_original', 'irrigation'], as
 cols = list(range(1, 5)) + list(range(-5, -1))
 j[j.columns[cols]]
 
-j.to_csv('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.csv')
-j.to_pickle('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.pkl')
+j.to_csv('N:/Data-Master/Profit_map/SPREAD_aggregated.csv')
+j.to_pickle('N:/Data-Master/Profit_map/SPREAD_aggregated.pkl')
 
 
 adf.loc[adf.duplicated(subset=['CELL_ID']), ('CELL_ID', 'CELL_HA', 'SA2_ID', 'COMMODITIES', 'COMMODITIES_DESC', 'IRRIGATION', 'SPREAD_ID', 'SPREAD_ID_original', 'Irrigation', 'SA2_Name', 'SPREAD_Name', 'Production', 'Area', 'Prod_factor', 'Yield')]

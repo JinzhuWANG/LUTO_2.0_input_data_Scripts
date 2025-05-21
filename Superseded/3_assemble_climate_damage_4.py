@@ -11,14 +11,14 @@ def runGCMs(gcm):
     ssps = ['ssp126', 'ssp245', 'ssp370', 'ssp585']
     
     # Set paths to input and output data folders
-    in_CO2_path = 'N:/Planet-A/Data-Master/Climate_damage/CO2_downloads/'
-    in_path = 'N:/Planet-A/Data-Master/Climate_damage/Climate_projection_data/'
-    out_GEOTIFF_path = 'N:/Planet-A/Data-Master/Climate_damage/Climate_damage_crops/'
-    out_delta_path = 'N:/Planet-A/Data-Master/Climate_damage/Climate_deltas/'
-    out_path = 'N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/Climate_damage_crops/'
+    in_CO2_path = 'N:/Data-Master/Climate_damage/CO2_downloads/'
+    in_path = 'N:/Data-Master/Climate_damage/Climate_projection_data/'
+    out_GEOTIFF_path = 'N:/Data-Master/Climate_damage/Climate_damage_crops/'
+    out_delta_path = 'N:/Data-Master/Climate_damage/Climate_deltas/'
+    out_path = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/Climate_damage_crops/'
     
     # Open NLUM mask raster and get metadata
-    with rasterio.open('N:/Planet-A/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as src:
+    with rasterio.open('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as src:
         NLUM_mask = src.read(1)
         
         # Get metadata and update parameters (note: count = 91 indicates multibands rasters where each band is a year)
@@ -91,7 +91,7 @@ def runGCMs(gcm):
 # Main execution code
 if __name__ == '__main__':
     
-    in_CO2_path = 'N:/Planet-A/Data-Master/Climate_damage/CO2_downloads/'
+    in_CO2_path = 'N:/Data-Master/Climate_damage/CO2_downloads/'
 
     # Load CO2 data (Meinshausen et al.) and concatenate historical data (2010 - 2014) with projected data (2015 onwards)
     CO2_hist = pd.read_csv(in_CO2_path + 'mole-fraction-of-carbon-dioxide-in-air_input4MIPs_GHGConcentrations_CMIP_UoM-CMIP-1-2-0_gr1-GMNHSH_0000-2014.csv')

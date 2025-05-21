@@ -21,7 +21,7 @@ pd.set_option('display.max_rows', 5000)
 pd.set_option('display.float_format', '{:,.4f}'.format)
 # 
 # Open NLUM_ID as mask raster and get metadata
-with rasterio.open('N:/Planet-A/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as rst:
+with rasterio.open('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as rst:
     NLUM_mask = rst.read(1)
     
     # Get metadata and update parameters
@@ -65,19 +65,19 @@ def downcast(dframe):
 
 
 # Open the template to crosscheck that we have all records needed
-def_df = pd.read_hdf('N:/Planet-A/Data-Master/Profit_map/NLUM_SPREAD_LU_ID_Mapped_Concordance.h5')
+def_df = pd.read_hdf('N:/Data-Master/Profit_map/NLUM_SPREAD_LU_ID_Mapped_Concordance.h5')
 def_df['SA2_ID'] = pd.to_numeric(def_df['SA2_ID'], downcast = 'integer')
 # def_df.rename(columns = {'SA2_MAIN11': 'SA2_ID'})
 
 # # Build an SA2, SA4, STATE concordance file - run once then load file
-# sa2 = gpd.read_file('N:/Planet-A/Data-Master/Australian_administrative_boundaries/sa2_2011_aus/SA2_2011_AUST.shp')
+# sa2 = gpd.read_file('N:/Data-Master/Australian_administrative_boundaries/sa2_2011_aus/SA2_2011_AUST.shp')
 # sa2 = pd.DataFrame(sa2)
 # sa2 = sa2[['SA2_MAIN11', 'SA2_NAME11', 'SA4_CODE11', 'SA4_NAME11', 'STE_CODE11', 'STE_NAME11']]
 # cols = ['SA2_MAIN11', 'SA4_CODE11', 'STE_CODE11']
 # sa2[cols] = sa2[cols].apply(pd.to_numeric, axis = 1)
 # downcast(sa2)
-# sa2.to_hdf('N:/Planet-A/Data-Master/Profit_map/SA2_SA4_STATE_Concordance.h5', key = 'SA2_SA4_STATE_Concordance', mode = 'w', format = 't')
-sa2 = pd.read_hdf('N:/Planet-A/Data-Master/Profit_map/SA2_SA4_STATE_Concordance.h5')
+# sa2.to_hdf('N:/Data-Master/Profit_map/SA2_SA4_STATE_Concordance.h5', key = 'SA2_SA4_STATE_Concordance', mode = 'w', format = 't')
+sa2 = pd.read_hdf('N:/Data-Master/Profit_map/SA2_SA4_STATE_Concordance.h5')
 
 # Merge SA4 and State info to LU template
 def_df = def_df.merge(sa2, how = 'left', left_on = 'SA2_ID', right_on = 'SA2_MAIN11')
@@ -99,7 +99,7 @@ def_df = def_df.merge(def_df_combos, how = 'left', on = ['SA2_ID', 'GAEZ_ID', 'I
 
 
 # Load GAEZ yield gap data from Michalis (only for crops)
-gaez = pd.read_csv('N:/Planet-A/Data-Master/Climate_damage/GAEZ_approach/From_Michalis/LUTO_CC_yield_impacts_SA2_20-Aug-2021 17.59.csv')
+gaez = pd.read_csv('N:/Data-Master/Climate_damage/GAEZ_approach/From_Michalis/LUTO_CC_yield_impacts_SA2_20-Aug-2021 17.59.csv')
 gaez = gaez.query('CO2_fert == 1')
 gaez.drop(columns = ['Unnamed: 0', 'LU_ID', 'Units', 'CO2_fert'], inplace = True)
 gaez.rename(columns = {'ID': 'GAEZ_ID', 'SA2_MAIN11': 'SA2_ID', 'Irrigation': 'IRRIGATION', '2010': 'YR_2010', '2020': 'YR_2020', '2050': 'YR_2050', '2080': 'YR_2080'}, inplace = True)
@@ -193,7 +193,7 @@ print('Number of NaNs =', ccp[ccp.isna().any(axis = 1)].shape[0])
 
 
 # Check that we have data everywhere we need it
-ludf = pd.read_hdf('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5')
+ludf = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5')
 ldf = ludf[['CELL_ID', 'SA2_ID', 'IRRIGATION', 'LU_ID', 'LU_DESC']]
 tmp = ldf.merge(ccp, how = 'left', on = ['SA2_ID', 'LU_ID', 'IRRIGATION']).query('LU_ID >= 5')
 print('Number of NaNs =', tmp[tmp.isna().any(axis=1)].shape[0])
@@ -201,6 +201,6 @@ print('Number of NaNs =', tmp[tmp.isna().any(axis=1)].shape[0])
 
 # Export to HDF5
 downcast(ccp)
-ccp.to_hdf('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/SA2_climate_damage_mult.h5', key = 'SA2_climate_damage_mult', mode = 'w', format = 'fixed')
+ccp.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/SA2_climate_damage_mult.h5', key = 'SA2_climate_damage_mult', mode = 'w', format = 'fixed')
 
 

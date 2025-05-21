@@ -16,15 +16,15 @@ pd.set_option('display.max_columns', 100)
 pd.set_option('display.max_rows', 200)
 pd.set_option('display.float_format', '{:,.2f}'.format)
 
-infile = 'N:/Planet-A/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif'
+infile = 'N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif'
 
 # Set file path
-in_cell_df_path = 'N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.pkl'
+in_cell_df_path = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.pkl'
  
 # Read cell_df file from disk to a new data frame for ag data with just the relevant columns
 cell_df = pd.read_pickle(in_cell_df_path)[['CELL_ID', 'X', 'Y', 'CELL_HA', 'SA2_ID', 'PRIMARY_V7', 'SPREAD_ID', 'SPREAD_DESC', 'IRRIGATION']] # 'COMMODITIES', 'COMMODITIES_DESC', 'IRRIGATION']]
 
-# cell_df = pd.read_csv('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.csv')
+# cell_df = pd.read_csv('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.csv')
 
 ################################ Open NLUM_ID as mask raster and get metadata, create some helper functions
 
@@ -76,7 +76,7 @@ def downcast(dframe):
 
 ################################ Join livestock mapping and yield data to the cell_df dataframe
 
-lmap = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210630/lmap_jul30/lmap.csv', low_memory = False)
+lmap = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210630/lmap_jul30/lmap.csv', low_memory = False)
 lmap = lmap[['X', 'Y', 'SA2_ID', 'irrigation', 'irrig_factor', 'kgDMhayr', 'SPREAD_original', 'SPREAD_name', 'safe_pur', 'feed_req_factor', 
              'pur', 'no_sheep', 'SPREAD_mapped','heads_mapped', 'heads_mapped_cum', 'Sheep', 'ha_pixel', 'SPREAD_id_mapped']]
 
@@ -180,7 +180,7 @@ ag_df.query("SPREAD_ID >= 31 and SPREAD_ID <= 33").groupby(['SPREAD_Commodity', 
 ################################ Join CROPS data from profit map table to the cell_df dataframe
 
 # Read in the PROFIT MAP table as provided by CSIRO to dataframe
-ag_df = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210621/T_pfe_per_product_21062021.csv').drop(columns = 'rev_notes')
+ag_df = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210621/T_pfe_per_product_21062021.csv').drop(columns = 'rev_notes')
 
 # Select crops only
 crops_df = ag_df.query("SPREAD_ID >= 5 and SPREAD_ID <= 25")
@@ -256,8 +256,8 @@ print('Number of NaNs =', crops_sum_df[crops_sum_df.isna().any(axis=1)].shape[0]
 downcast(crops_sum_df)
 
 # Save file
-crops_sum_df.to_csv('N:/Planet-A/Data-Master/Profit_map/crop_yield_econ_water_SPREAD.csv')
-crops_sum_df.to_hdf('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/crop_data_SPREAD.h5', key = 'crop_yield_econ_water_SPREAD', mode = 'w', format = 't')
+crops_sum_df.to_csv('N:/Data-Master/Profit_map/crop_yield_econ_water_SPREAD.csv')
+crops_sum_df.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/crop_data_SPREAD.h5', key = 'crop_yield_econ_water_SPREAD', mode = 'w', format = 't')
 
 # Join the table to the cell_df dataframe and drop uneccesary columns
 adf = cell_df.merge(crops_sum_df, how = 'left', left_on = ['SA2_ID', 'SPREAD_ID', 'IRRIGATION'], right_on = ['SA2_ID', 'SPREAD_ID', 'Irrigation']) 
@@ -310,8 +310,8 @@ cep_df.rename(columns = {'SPREAD_Commodity': 'SPREAD_Name',
 downcast(cep_df)
 
 # Save file
-cep_df.to_csv('N:/Planet-A/Data-Master/Profit_map/cep_yield_econ_SPREAD.csv')
-cep_df.to_hdf('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cep_yield_econ_SPREAD.h5', key = 'cep_yield_econ_SPREAD', mode = 'w', format = 't')
+cep_df.to_csv('N:/Data-Master/Profit_map/cep_yield_econ_SPREAD.csv')
+cep_df.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cep_yield_econ_SPREAD.h5', key = 'cep_yield_econ_SPREAD', mode = 'w', format = 't')
 
 
 
@@ -319,7 +319,7 @@ cep_df.to_hdf('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial
 
 ################################ Livestock mapping
 
-with rasterio.open('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210623/livestock_test.tif') as src:
+with rasterio.open('N:/Data-Master/Profit_map/From_CSIRO/20210623/livestock_test.tif') as src:
     # rst = src.read(1, window = from_bounds(*NLUM_bounds, transform = src.transform, height = NLUM_height, width = NLUM_width)) # Clip raster
     
     # Create an empty destination array 
@@ -332,7 +332,7 @@ with rasterio.open('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210623/lives
     dst_array = np.where(NLUM_mask == 1, dst_array, 99)    
     
     # Save the output to GeoTiff
-    with rasterio.open('N:/Planet-A/Data-Master/Profit_map/livestock_map.tif', 'w+', dtype = 'int8', nodata = 99, **meta) as dst:        
+    with rasterio.open('N:/Data-Master/Profit_map/livestock_map.tif', 'w+', dtype = 'int8', nodata = 99, **meta) as dst:        
         dst.write_band(1, dst_array)
     
     # Flatten 2D array to 1D array of valid values only
@@ -371,7 +371,7 @@ x.groupby(['SPREAD_DESC', 'IRRIGATION', 'SPREAD_ID_LS'])[['SPREAD_ID_LS']].count
 ################################ Join EMISSIONS table
 
 # Read in the CROPS EMISSIONS table, join to cell_df, and drop unwanted columns
-CO2 = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210603/T_emissions_by_SPREAD_SA2_crops.csv')
+CO2 = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210603/T_emissions_by_SPREAD_SA2_crops.csv')
 tmp = crops_sum_df.merge(CO2, how = 'left', left_on = ['SA2_ID', 'SPREAD_ID', 'Irrigation'], right_on = ['sa2_id', 'spread_id', 'irrigation']).drop(columns = ['Area_ABS', 'Prod_ABS', 'Yield', 'P1', 'AC', 'QC', 'FDC', 'FLC', 'FOC', 'WR', 'WP'])
 print('Number of NaNs =', tmp[tmp.isna().any(axis=1)].shape[0])
 
@@ -400,7 +400,7 @@ print('Number of NaNs =', tmp[tmp.isna().any(axis=1)].shape[0])
 ################################ Join Fertilizer table 
 
 # Read in the Fertilizer table
-NPKS = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210603/T_NPKS_by_SPREAD_SA2.csv')
+NPKS = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210603/T_NPKS_by_SPREAD_SA2.csv')
 tmp = crops_sum_df.merge(NPKS, how = 'left', left_on = ['SA2_ID', 'SPREAD_ID', 'Irrigation'], right_on = ['sa2_id', 'SPREAD_ID', 'irrigation']).drop(columns = ['Area_ABS', 'Prod_ABS', 'Yield', 'P1', 'AC', 'QC', 'FDC', 'FLC', 'FOC', 'WR', 'WP'])
 print('Number of NaNs =', tmp[tmp.isna().any(axis=1)].shape[0])
 
@@ -409,7 +409,7 @@ print('Number of NaNs =', tmp[tmp.isna().any(axis=1)].shape[0])
 
 # =============================================================================
 # Read in the TOXICITY table
-TOX = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/20210603/T_USETOX_CFvalue_by_SPREAD_SA2_wide.csv')
+TOX = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/20210603/T_USETOX_CFvalue_by_SPREAD_SA2_wide.csv')
 tmp = crops_sum_df.merge(TOX, how = 'left', left_on = ['SA2_ID', 'SPREAD_ID', 'Irrigation'], right_on = ['SA211_id', 'SPREAD_ID', 'irrigation']).drop(columns = ['Area_ABS', 'Prod_ABS', 'Yield', 'P1', 'AC', 'QC', 'FDC', 'FLC', 'FOC', 'WR', 'WP'])
 print('Number of NaNs =', tmp[tmp.isna().any(axis=1)].shape[0])
 
@@ -448,7 +448,7 @@ ag_df[(ag_df['area_ABS'] < 1) & (ag_df['SPREAD_ID'] <= 25) & (ag_df['SPREAD_ID']
 
 
 # Read in the profit map table to dataframe
-javi = pd.read_csv('N:/Planet-A/Data-Master/Profit_map/From_CSIRO/T_pfe_per_product_07052021.csv')
+javi = pd.read_csv('N:/Data-Master/Profit_map/From_CSIRO/T_pfe_per_product_07052021.csv')
 javi.rename(columns={'yield': 'Yield', 'prod': 'Production', 'irrig_factor': 'Prod_factor'}, inplace = True)
 
 javi.info()
@@ -515,8 +515,8 @@ j.sort_values(by=['SA2_ID', 'SPREAD_ID', 'SPREAD_ID_original', 'irrigation'], as
 cols = list(range(1, 5)) + list(range(-5, -1))
 j[j.columns[cols]]
 
-j.to_csv('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.csv')
-j.to_pickle('N:/Planet-A/Data-Master/Profit_map/SPREAD_aggregated.pkl')
+j.to_csv('N:/Data-Master/Profit_map/SPREAD_aggregated.csv')
+j.to_pickle('N:/Data-Master/Profit_map/SPREAD_aggregated.pkl')
 
 
 adf.loc[adf.duplicated(subset=['CELL_ID']), ('CELL_ID', 'CELL_HA', 'SA2_ID', 'COMMODITIES', 'COMMODITIES_DESC', 'IRRIGATION', 'SPREAD_ID', 'SPREAD_ID_original', 'Irrigation', 'SA2_Name', 'SPREAD_Name', 'Production', 'Area', 'Prod_factor', 'Yield')]

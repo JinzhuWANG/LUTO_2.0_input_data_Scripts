@@ -61,7 +61,7 @@ def download_file(path):
     ftp = FTP('qld.auscover.org.au')  # connect to host, default port
     ftp.login()
     ftp.cwd('/tern-soils/Products/National_digital_soil_property_maps/' + path[0])
-    with open('N:/Planet-A/Data-Master/Soil_Landscape_Grid_Australia/' + path[1], 'wb') as fp:
+    with open('N:/Data-Master/Soil_Landscape_Grid_Australia/' + path[1], 'wb') as fp:
         ftp.retrbinary('RETR ' + path[1], fp.write)
     ftp.quit()
 
@@ -73,7 +73,7 @@ def download_file(path):
 
 def downsample_to_1km(fn):
     
-    with rasterio.open('N:/Planet-A/Data-Master/Soil_Landscape_Grid_Australia/' + fn) as src:
+    with rasterio.open('N:/Data-Master/Soil_Landscape_Grid_Australia/' + fn) as src:
         
         # Create an empty destination array 
         dst_array = np.zeros((NLUM_height, NLUM_width), np.float32)
@@ -89,7 +89,7 @@ def downsample_to_1km(fn):
         dst_array_filled = fillnodata(dst_array, fill_mask, max_search_distance = 100.0) * NLUM_mask
         
         # Save the output to GeoTiff
-        with rasterio.open('N:/Planet-A/Data-Master/Water/Water_yield_modelling/' + fn[:-4] + '_1km.tif', 'w+', dtype = 'float32', nodata = 0, **meta) as dst:        
+        with rasterio.open('N:/Data-Master/Water/Water_yield_modelling/' + fn[:-4] + '_1km.tif', 'w+', dtype = 'float32', nodata = 0, **meta) as dst:        
             if 'DE' in fn: mult = 1000
             else: mult = 0.01
             dst.write_band(1, dst_array_filled * mult) # multiplier to get correct units for INVEST
@@ -102,11 +102,11 @@ def downsample_to_1km(fn):
 
 def reproj_for_INVEST():
     
-    file_list = [('N:/Planet-A/Data-Master/WorldClim_CMIP6/Australia/Australia_1km/Annual_20-year_snapshots/Historical_1970-2000/', 'wc2.1_2.5m_prec_Historical_1970-2000_AUS_1km_AnnAvgTot.tif'),
-                 ('N:/Planet-A/Data-Master/WorldClim_CMIP6/Australia/Australia_1km/Annual_20-year_snapshots/Historical_1970-2000/', 'wc2.1_2.5m_evap_Historical_1970-2000_AUS_1km_AnnAvgTot.tif'),
-                 ('N:/Planet-A/Data-Master/Water/Water_yield_modelling/', 'DES_000_200_EV_N_P_AU_NAT_C_20140801_1km.tif'),
-                 ('N:/Planet-A/Data-Master/Water/Water_yield_modelling/', 'AWC_mean.tif'), 
-                 ('N:/Planet-A/Data-Master/National_Landuse_Map/', 'NLUM_2010-11_mask.tif')]
+    file_list = [('N:/Data-Master/WorldClim_CMIP6/Australia/Australia_1km/Annual_20-year_snapshots/Historical_1970-2000/', 'wc2.1_2.5m_prec_Historical_1970-2000_AUS_1km_AnnAvgTot.tif'),
+                 ('N:/Data-Master/WorldClim_CMIP6/Australia/Australia_1km/Annual_20-year_snapshots/Historical_1970-2000/', 'wc2.1_2.5m_evap_Historical_1970-2000_AUS_1km_AnnAvgTot.tif'),
+                 ('N:/Data-Master/Water/Water_yield_modelling/', 'DES_000_200_EV_N_P_AU_NAT_C_20140801_1km.tif'),
+                 ('N:/Data-Master/Water/Water_yield_modelling/', 'AWC_mean.tif'), 
+                 ('N:/Data-Master/National_Landuse_Map/', 'NLUM_2010-11_mask.tif')]
     
     dst_crs = 'EPSG:3577'
     
@@ -116,7 +116,7 @@ def reproj_for_INVEST():
             kwargs = src.meta.copy()
             kwargs.update({'crs': dst_crs, 'transform': transform, 'width': width, 'height': height})
         
-            with rasterio.open('N:/Planet-A/Data-Master/Water/Water_yield_modelling/Projected_data_for_INVEST/' + file[1], 'w+', **kwargs) as dst:
+            with rasterio.open('N:/Data-Master/Water/Water_yield_modelling/Projected_data_for_INVEST/' + file[1], 'w+', **kwargs) as dst:
                 for i in range(1, src.count + 1):
                     reproject(source = rasterio.band(src, i),
                               destination = rasterio.band(dst, i),
@@ -145,15 +145,15 @@ def calculate_water_yield_GCMs(params):
     else: Kc, root_depth = 1.008, 3500
     
     # Set paths to input and output data folders
-    in_path = 'N:/Planet-A/Data-Master/WorldClim_CMIP6/Australia/Australia_1km/Annual_yearly_interpolated_1970-2100/HDF5/'
-    out_path_gtif = 'N:/Planet-A/Data-Master/Water/Water_yield_modelling/Water_yield_projections/GeoTiff/'
-    out_path_h5 = 'N:/Planet-A/Data-Master/Water/Water_yield_modelling/Water_yield_projections/HDF5/'
+    in_path = 'N:/Data-Master/WorldClim_CMIP6/Australia/Australia_1km/Annual_yearly_interpolated_1970-2100/HDF5/'
+    out_path_gtif = 'N:/Data-Master/Water/Water_yield_modelling/Water_yield_projections/GeoTiff/'
+    out_path_h5 = 'N:/Data-Master/Water/Water_yield_modelling/Water_yield_projections/HDF5/'
     
     os.makedirs(out_path_gtif, exist_ok = True)
     os.makedirs(out_path_h5, exist_ok = True)
     
     # Open NLUM mask raster and get metadata
-    with rasterio.open('N:/Planet-A/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as src:
+    with rasterio.open('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as src:
         NLUM_mask = src.read(1)
         
         # Get metadata and update parameters (note: count = 91 indicates multibands rasters where each band is a year)
@@ -225,17 +225,17 @@ def calculate_ensembles(params):
     gcms = ['BCC-CSM2-MR', 'CanESM5', 'CNRM-CM6-1', 'CNRM-ESM2-1', 'IPSL-CM6A-LR', 'MIROC6', 'MIROC-ES2L', 'MRI-ESM2-0']
     
     # Set some paths to input and output data
-    inpath = 'N:/Planet-A/Data-Master/Water/Water_yield_modelling/Water_yield_projections/HDF5/'
-    path_gtif = 'N:/Planet-A/Data-Master/Water/Water_yield_modelling/Water_yield_projections/GeoTiff/'
-    path_hdf5 = 'N:/Planet-A/Data-Master/Water/Water_yield_modelling/Water_yield_projections/HDF5/'
-    path_LUTO = 'N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/'
+    inpath = 'N:/Data-Master/Water/Water_yield_modelling/Water_yield_projections/HDF5/'
+    path_gtif = 'N:/Data-Master/Water/Water_yield_modelling/Water_yield_projections/GeoTiff/'
+    path_hdf5 = 'N:/Data-Master/Water/Water_yield_modelling/Water_yield_projections/HDF5/'
+    path_LUTO = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/4D_Spatial_SSP_Timeseries/'
     
     nbands = 131
     
     os.makedirs(path_gtif, exist_ok = True)
     
     # Open NLUM mask raster and get mask raster and metadata
-    with rasterio.open('N:/Planet-A/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as rst:
+    with rasterio.open('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as rst:
         NLUM_mask = rst.read(1)
         meta = rst.meta.copy()
         meta.update(compress = 'lzw', driver = 'GTiff', dtype = 'float32', nodata = -9999)
@@ -293,7 +293,7 @@ def calculate_ensembles(params):
 if __name__ == '__main__':
     
     # Open NLUM mask raster and get metadata
-    with rasterio.open('N:/Planet-A/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as rst:
+    with rasterio.open('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as rst:
     
         # Read geotiff to numpy array
         NLUM_mask = rst.read(1) # Loads a 2D masked array with nodata masked out
@@ -335,14 +335,14 @@ if __name__ == '__main__':
     ############ 
     
     # # Load 2D input data arrays and flatten to 1D
-    # with rasterio.open('N:/Planet-A/Data-Master/Water/Water_yield_modelling/DER_000_999_EV_N_P_AU_NAT_C_20150601_fixed_1km.tif') as rst:
+    # with rasterio.open('N:/Data-Master/Water/Water_yield_modelling/DER_000_999_EV_N_P_AU_NAT_C_20150601_fixed_1km.tif') as rst:
     #     soil_depth = np.round(rst.read(1))[NLUM_mask == 1].astype(np.float32)
         
     # # Load depth-specific AWC layers and assemble into data brick
     # fns = ['AWC_000_005_EV_N_P_AU_NAT_C_20140801_1km.tif', 'AWC_005_015_EV_N_P_AU_NAT_C_20140801_1km.tif', 'AWC_015_030_EV_N_P_AU_NAT_C_20140801_1km.tif', 'AWC_030_060_EV_N_P_AU_NAT_C_20140801_1km.tif', 'AWC_060_100_EV_N_P_AU_NAT_C_20140801_1km.tif', 'AWC_100_200_EV_N_P_AU_NAT_C_20140801_1km.tif']
     # AWC_brick = np.zeros((len(fns), np.sum(NLUM_mask == 1)), dtype = np.float32)   
     # for i, fn in enumerate(fns):
-    #     with rasterio.open('N:/Planet-A/Data-Master/Water/Water_yield_modelling/' + fn) as rst:
+    #     with rasterio.open('N:/Data-Master/Water/Water_yield_modelling/' + fn) as rst:
     #         AWC_brick[i, :] = rst.read(1)[NLUM_mask == 1]
     
     
@@ -380,7 +380,7 @@ if __name__ == '__main__':
     
     # Calculate depth-weighted mean AWC for use in the INVEST software (only takes 1 layer)
     # AWC_mean = (AWC_brick[0, :] * 5 + AWC_brick[1, :] * 10 + AWC_brick[2, :] * 15 + AWC_brick[3, :] * 30 + AWC_brick[4, :] * 40 + AWC_brick[5, :] * 100) / 200
-    # with rasterio.open('N:/Planet-A/Data-Master/Water/Water_yield_modelling/AWC_mean.tif', 'w+', dtype = 'float32', nodata = -99, **meta) as out:
+    # with rasterio.open('N:/Data-Master/Water/Water_yield_modelling/AWC_mean.tif', 'w+', dtype = 'float32', nodata = -99, **meta) as out:
     #     out.write_band(1, conv_1D_to_2D(AWC_mean))   
     
     
@@ -388,8 +388,8 @@ if __name__ == '__main__':
     """ Helpful code for exploring results
     
     # Read cell_df from disk, just grab the CELL_ID column
-    cell_df = pd.read_pickle('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.pkl')[['CELL_ID', 'CELL_HA', 'HR_DRAINDIV_NAME']]
-    cell_df['WATER_USE_TREES_ML_HA'] = pd.read_pickle('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.pkl')[['WATER_USE_TREES_KL_HA']] / 1000
+    cell_df = pd.read_pickle('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.pkl')[['CELL_ID', 'CELL_HA', 'HR_DRAINDIV_NAME']]
+    cell_df['WATER_USE_TREES_ML_HA'] = pd.read_pickle('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.pkl')[['WATER_USE_TREES_KL_HA']] / 1000
     
     cell_df['water_impact_of_trees_ML_HA'] = cell_df.eval('water_yield_under_crops_ML_HA - water_yield_under_forest_ML_HA')
     
@@ -401,7 +401,7 @@ if __name__ == '__main__':
     
     
     # Open a new GeoTiFF file
-    with rasterio.open('N:/Planet-A/Data-Master/Water/Water_yield_modelling/water_impact_of_trees_ML_HA.tif', 'w+', dtype = 'float32', nodata = -99, **meta) as out:
+    with rasterio.open('N:/Data-Master/Water/Water_yield_modelling/water_impact_of_trees_ML_HA.tif', 'w+', dtype = 'float32', nodata = -99, **meta) as out:
         out.write_band(1, conv_1D_to_2D(cell_df['water_impact_of_trees_ML_HA']))
     
     cell_df.groupby('HR_DRAINDIV_NAME')[['water_yield_under_crops_GL', 'water_yield_under_forest_GL', 'water_impact_of_trees_GL', 'WATER_USE_TREES_GL']].sum()

@@ -4,11 +4,11 @@ import pandas as pd
 import h5py
 
 
-x = np.load('N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/Climate_damage_crops/Climate_damage_crops_BCC-CSM2-MR_ssp245_2010-2100.npy')
+x = np.load('N:/Data-Master/LUTO_2.0_input_data/Input_data/Climate_damage_crops/Climate_damage_crops_BCC-CSM2-MR_ssp245_2010-2100.npy')
 
 """
 
-in_cell_df_path = 'N:/Planet-A/Data-Master/LUTO_2.0_input_data/Input_data/cell_zones_df.pkl'
+in_cell_df_path = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/cell_zones_df.pkl'
 t0 = time.time()
 cell_df = pd.read_pickle(in_cell_df_path)
 print('Load Pickle =', time.time() - t0)

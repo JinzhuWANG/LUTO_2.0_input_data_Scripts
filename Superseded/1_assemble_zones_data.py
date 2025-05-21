@@ -688,7 +688,7 @@ def join_Aqueduct():
     global cell_df
     
     # Read file from GeoPackage
-    AD_file = 'N:/Planet-A/Data-Master/Water/Aqueduct_3.0_V01/baseline/annual/y2019m07d11_aqueduct30_annual_v01.gpkg'
+    AD_file = 'N:/Data-Master/Water/Aqueduct_3.0_V01/baseline/annual/y2019m07d11_aqueduct30_annual_v01.gpkg'
     AD_gdf = gpd.read_file(AD_file, layer='y2019m07d11_aqueduct30_annual_v01')
     
     AD_gdf = AD_gdf[['geometry', 'bws_cat', 'bws_label']]
@@ -705,7 +705,7 @@ def join_Aqueduct():
     shapes = ((geom, value) for geom, value in zip(AD_gdf.geometry, AD_gdf.bws_cat)) 
     
     # Open a new GeoTiFF file
-    outfile = "N:/Planet-A/Data-Master/Water/Aqueduct_3.0_V01/baseline/annual/AD_BWS_CAT_raster_filled.tif"
+    outfile = "N:/Data-Master/Water/Aqueduct_3.0_V01/baseline/annual/AD_BWS_CAT_raster_filled.tif"
     
     with rasterio.open(outfile, 'w+', **meta) as out:
         
