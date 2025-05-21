@@ -608,11 +608,11 @@ def get_presense_and_save_path(row):
     # Get value for rasterisation polygon (1 for 'maybe present', 2 for 'likely present')
     if 'PRES_RANK' in row:  # ECNES data
         val = row['PRES_RANK']
-        name = row['COMMUNITY'].replace('/', '_')
+        name = re.sub(r'[^a-zA-Z0-9]', '_', row['COMMUNITY'])
         save_path = f'{SNES_ECNES_dir}/Processed/ECNES/{name}_{presence_dict[val]}.tif'
     else:                   # SNES data
         val = row['PRESENCE_RANK']
-        name = row['SCIENTIFIC_NAME'].replace('/', '_')
+        name = re.sub(r'[^a-zA-Z0-9]', '_', row['SCIENTIFIC_NAME'])
         save_path = f'{SNES_ECNES_dir}/Processed/SNES/{row["TAXON_GROUP"]}/{name}/{name}_{presence_dict[val]}.tif'
     
     # Replace spaces with underscores
@@ -763,7 +763,7 @@ save_paths = pd.DataFrame()
 for _,df in ecnes_meta.groupby(['COMMUNITY']):
     # Get name and new save-path
     first_row = df.iloc[0]
-    name = first_row['COMMUNITY'].replace('/', '_').replace(' ', '_')
+    name = re.sub(r'[^a-zA-Z0-9]', '_', first_row['COMMUNITY'])
     # Create a new folder to store the merged data
     save_dir = f'{SNES_ECNES_dir}/Processed/LIKELY_MAYBE_MERGED/ECNES'
     save_path = f'{save_dir}/{name}.tif'
@@ -802,9 +802,33 @@ snes_merged_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta_mer
 ecnes_merged_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta_merged.csv')['TIF_PATH'].values
 
 
+snes_merged_tifs = pd.read_csv(f'N:/Data-Master/Biodiversity/DCCEEW/SNES_ECNES/Processed/Supersede/DCCEEW_SNES_meta_merged.csv')
+snes_merged_tifs['TIF_PATH'] = snes_merged_tifs['TIF_PATH'].str.replace('SNES_GEOTIFF', 'SNES_ECNES/Processed/Supersede', regex=False)
+snes_merged_tifs = snes_merged_tifs['TIF_PATH'].values
+
+valid_tif = []
+for i in tqdm(snes_merged_tifs, total=len(snes_merged_tifs)):
+    if not os.path.exists(i):
+        print(f'{i} does not exist')
+        continue
+    try:
+        with rasterio.open(i) as src:
+            pass
+    except Exception as e:
+        print(f'{i} is not a valid TIF file: {e}')
+        continue
+    
+    valid_tif.append(i)
+
+snes_merged_tifs = valid_tif
+
+
+
+
+
 # Save the TIF path to txt files
 with open(f'{SNES_ECNES_dir}/Processed/Zonation/SNES_files.txt', 'w') as f_snes,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_files.txt', 'w') as f_ecnes:
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_files.txt', 'w', encoding='utf-8') as f_ecnes:
     f_snes.write('filename\n')
     f_snes.write('\n'.join(snes_merged_tifs))
     f_ecnes.write('filename\n')
@@ -835,7 +859,7 @@ with rasterio.open(snes_merged_tifs[0]) as src:
 
 # Create the zonation settings file
 with open(f'{SNES_ECNES_dir}/Processed/Zonation/snes_settings.txt', 'w') as snes_settings,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_settings.txt', 'w') as ecnes_settings:
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_settings.txt', 'w', encoding='utf-8') as ecnes_settings:
          
     snes_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/SNES_files.txt
     analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
@@ -855,7 +879,7 @@ subprocess.run([
     '--mode=CAZMAX', 
     '-ah',
     f'{SNES_ECNES_dir}/Processed/Zonation/snes_settings.txt',
-    f'{SNES_ECNES_dir}/Processed/Zonation/SNES_Priority' 
+    f'{SNES_ECNES_dir}/Processed/Zonation/SNES_Priority_OLD' 
 ])
 
 subprocess.run([
@@ -865,9 +889,6 @@ subprocess.run([
     f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_settings.txt',
     f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_Priority'
 ])
-
-
-
 
 
 

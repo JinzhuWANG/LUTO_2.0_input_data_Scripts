@@ -1,2 +1,5 @@
-.vscode/settings.json
+.vscode
 .vscode-upload.json
+.pylint.d/**
+.spyproject/**
+__pycache__/
