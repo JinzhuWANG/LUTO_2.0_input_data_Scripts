@@ -654,7 +654,132 @@ cell_df['NATURAL_AREA_CONNECTIVITY'] = distance_to_natural[NLUM_mask == 1]
 
 # Drop column
 cell_df = cell_df.drop(columns = 'PRIMARY_V7')
+
+
+
+############## Water use by demostic and industrial sectors
+'''
+Data source:
+ - Total water consumption: taken from (https://www.abs.gov.au/AUSSTATS/abs@.nsf/DetailsPage/4610.02010-11?OpenDocument)
+ - Total Population: taken from (https://www.abs.gov.au/AUSSTATS/abs@.nsf/DetailsPage/3101.0Dec%202010?OpenDocument)
+ - Population grid cell (persons/km2): data from (https://www.abs.gov.au/AUSSTATS/abs@.nsf/DetailsPage/1270.0.55.0072011?OpenDocument)
+
+Logic:
+ 1) Water consumption per person = Total water consumption / Total Population
+ 2) Reproject water shed to match population grid
+ 3) Sum (water consumption per person * population grid cell) by watershed to get water consumption per region
+'''
+
+
+# Get the total population (number, Dec 2010)
+population = {
+    'New South Wales':7272158,
+    'Victoria':  5585566,
+    'Queensland':  4548661,
+    'South Australia':  1650377,
+    'Western Australia':  2317064,
+    'Tasmania':  509292,
+    'Northern Territory':  229874,
+    'Australian Capital Territory':  361914
+}
+
+# Get the total water consumption (ML, 2010)
+water_ag_state = {}
+water_domestic_state = {}
+for state in population.keys():
+    df = pd.read_excel(
+        f'N:/Data-Master/Water/Water_account/Water Supply and Use 2010-11 - {state}.xls', 
+        sheet_name = 'Table_1',
+    )[['Australian Bureau of Statistics', 'Unnamed: 9']]
+
+    water_use_ag = df.iloc[17, 1]
     
+    water_use_mining = df.iloc[22, 1]
+    water_use_manufacturing = df.iloc[23, 1]
+    water_use_elec = df.iloc[25, 1]
+    water_use_supply_sewerage_drainage = df.iloc[26, 1]
+    water_use_collection_treatment_disposal = df.iloc[27, 1]
+    water_use_other_indus = df.iloc[28, 1]
+    water_use_household = df.iloc[29, 1]
+    
+    water_ag_state[state] = water_use_ag
+    water_domestic_state[state] = (
+        water_use_mining 
+        + water_use_manufacturing 
+        + water_use_elec              # Water use for electricity generation is used again downstream, so not included to avoid double counting
+        + water_use_supply_sewerage_drainage
+        + water_use_collection_treatment_disposal
+        + water_use_other_indus 
+        + water_use_household
+    )
+    
+ag_water_df = pd.DataFrame.from_dict(water_ag_state, orient='index', columns=['Water_Use_Agriculture_ML']).reset_index(names='State')
+ag_water_df.to_csv('N:/Data-Master/Water/Water_account/Water_Use_Agriculture_ML.csv', index=False) 
+
+
+# Calculate the per capita water consumption (ML/person)
+water_domestic_capita = {}
+for state in population.keys():
+    water_domestic_capita[state] = water_domestic_state[state] / population[state]
+    
+    
+    
+# Burning the per capita water consumption data SA2
+with rasterio.open('N:/Data-Master/Population/australian_population_grid_2011_tif_format/Australian_Population_Grid_2011.tif') as src_pop_per_km2,\
+     rasterio.open('N:/Data-Master/Water/GeoFabric_V3.2/HR_Regions_GDB_V3_2/HR_Regions_GDB/HR_DrainDiv_raster_filled.tif') as water_DR,\
+     rasterio.open('N:/Data-Master/Water/GeoFabric_V3.2/HR_Regions_GDB_V3_2/HR_Regions_GDB/HR_RivReg_raster_filled.tif') as water_RR:
+         
+    # Get geo reference info
+    src_pop_meta = src_pop_per_km2.meta.copy()
+    src_pop_meta.update({'nodata': None,'compress': 'lzw'})
+    src_pop_arr = src_pop_per_km2.read(1)                                                      # persons/km2
+    src_pop_arr *= np.array(list(population.values())).sum() / src_pop_arr.sum()               # Adjust population grid to match ABS report
+    
+    # Reproject SA2 shapefile to match population grid
+    SA2_gdf = gpd.read_file('N:/Data-Master/Australian_administrative_boundaries/sa2_2011_aus/SA2_2011_AUST.shp')
+    SA2_gdf = SA2_gdf.to_crs(src_pop_meta['crs'])
+    SA2_gdf = SA2_gdf[SA2_gdf['geometry'].notna()].reset_index()
+    SA2_gdf['SA2_MAIN11'] = SA2_gdf['SA2_MAIN11'].astype(np.int32)
+    shapes = ((geom, water_domestic_capita[s]) for geom, s in zip(SA2_gdf.geometry, SA2_gdf['STE_NAME11']) if s in water_domestic_capita.keys())
+     
+    # Rasterise the SA2 shapefile, filling the nodata cells with the nearest neighbour
+    out_arr = np.zeros((src_pop_meta['height'], src_pop_meta['width']), np.float32)
+    water_per_capita = features.rasterize(shapes=shapes, fill=0, out=out_arr, transform=src_pop_meta['transform'])      # ML/person
+    
+    ind_tofill = nd.distance_transform_edt(water_per_capita==0, return_distances = False, return_indices = True)
+    water_per_capita = out_arr[tuple(ind_tofill)]
+
+    with rasterio.open('N:/Data-Master/Water/Water_account/WATER_USE_DOMESTIC_INDUSTRIAL_ML_PER_PERSON.tif', 'w+', **src_pop_meta) as out:
+        out.write_band(1, water_per_capita)
+    
+    # Reproject watershed to match population grid
+    water_DR_arr = np.zeros((src_pop_meta['height'], src_pop_meta['width']), np.int16)
+    water_RR_arr = np.zeros((src_pop_meta['height'], src_pop_meta['width']), np.int16)
+    reproject(rasterio.band(water_DR, 1), water_DR_arr, dst_transform = src_pop_meta['transform'], dst_crs = src_pop_meta['crs'], resampling = Resampling.nearest)
+    reproject(rasterio.band(water_RR, 1), water_RR_arr, dst_transform = src_pop_meta['transform'], dst_crs = src_pop_meta['crs'], resampling = Resampling.nearest)
+    with rasterio.open('N:/Data-Master/Water/Water_account/WATER_USE_DRAINAGE_REGIONS_MATCH_POP.tif', 'w+', **src_pop_meta) as water_DR_out,\
+         rasterio.open('N:/Data-Master/Water/Water_account/WATER_USE_RIVER_REGIONS_MATCH_POP.tif', 'w+', **src_pop_meta) as water_RR_out:
+            water_DR_out.write_band(1, water_DR_arr)
+            water_RR_out.write_band(1, water_RR_arr)
+            
+    # Calculate the water consumption per watershed
+    water_ues_total_DD = np.bincount(water_DR_arr[water_DR_arr > 0], weights=(water_per_capita * src_pop_arr)[water_DR_arr > 0])
+    water_ues_total_RR = np.bincount(water_RR_arr[water_RR_arr > 0], weights=(water_per_capita * src_pop_arr)[water_RR_arr > 0])
+
+    water_ues_total_DD_dict = {('DRIANAGE_REGION',k):[v] for k, v in enumerate(water_ues_total_DD) if k!= 0}
+    water_ues_total_RR_dict = {('RIVER_REGION',k):[v] for k, v in enumerate(water_ues_total_RR) if k!= 0}
+    
+    out_df = pd.concat([
+        pd.DataFrame(water_ues_total_DD_dict).T,
+        pd.DataFrame(water_ues_total_RR_dict).T
+    ], axis=0).reset_index()
+    
+    out_df.columns = ['REGION_TYPE', 'REGION_ID', 'DOMESTIC_INDUSTRIAL_WATER_USE_ML']
+    out_df.to_csv('N:/Data-Master/Water/Water_account/Water_use_DD_RR_ML.csv', index=False)
+
+
+
+
 
 
 
