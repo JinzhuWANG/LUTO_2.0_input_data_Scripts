@@ -1,5 +1,7 @@
+
 import os, re
 import subprocess
+from textwrap import fill
 import netCDF4
 import rasterio, fiona
 import xarray as xr
@@ -12,6 +14,7 @@ from glob import glob
 from itertools import product
 from tqdm.auto import tqdm
 from joblib import Parallel, delayed
+from scipy.signal import convolve2d
 from rasterio import features
 from rasterio.warp import reproject
 from pyproj import CRS
@@ -531,20 +534,26 @@ bio_scores.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF8_SCORES_GROUP.csv', 
 # ------------------- Rasterise SNES/ECNES data to GEOTIFF ------------------------------------------
 
 '''
-This section rasterises the SNES and ECNES data to GEOTIFF files. The data is dissolved by 'SCIENTIFIC_NAME' for SNES 
-and 'COMMUNITY' for ECNES.
+Save SNES/ECNES to TIFFS.
 
-Each cell is assigned a value of 1 for 'maybe present' and 2 for 'likely present'. The rasterised data is then saved
-to the '{SNES_ECNES_dir}/Processed/' folder. A csv file containing the metadata of the dissolved vector data and 
-paths to the rasterised data is also saved to '{SNES_ECNES_dir}/DCCEEW_SNES_meta.csv'.
+ - 0: Not present
+ - 1: May present
+ - 2: Likely present
+ - 255: No data
 
-Note: The 'LIKELY' and 'MAYBE' layers are not overlapped, 'MAYBE' layers are surrounding the 'LIKELY' layers.
+A csv file containing the metadata of the dissolved vector data and paths to the 
+rasterised data is also saved to '{SNES_ECNES_dir}/Processed'.
+
+Note: The 'LIKELY' and 'MAYBE' layers are not overlapped, 'MAYBE' layers are 
+surrounding the 'LIKELY' layers.
 
 '''
 
 
 # Set parameters
 n_workers = 20
+presence_dict = {1: 'MAYBE', 2: 'LIKELY'}
+
 
 # Read the reference raster data
 ref_mask = NLUM.values
@@ -561,8 +570,6 @@ ref_meta = {
 }
 
 
-# Define the k-v pair for presence 
-presence_dict = {1: 'MAYBE', 2: 'LIKELY'}
 
 
 # Read the SNES biodiversity data; dissolve the data by 'SCIENTIFIC_NAME'
@@ -623,10 +630,10 @@ def get_presense_and_save_path(row):
 
 # Function to rasterise the data
 def rasterize(row):
-    _, save_path = get_presense_and_save_path(row)
+    val, save_path = get_presense_and_save_path(row)
     # Rasterise the polygon
     arr = rasterio.features.rasterize(
-        [(row["geometry"], 1)],
+        [(row["geometry"], val)],
         out_shape=ref_mask.shape,
         transform=ref_meta['transform'],
         all_touched=False,
@@ -680,40 +687,76 @@ ecnes_meta.to_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta.csv', index=Fal
 
 
 
+
+
+
 # ------------------- Merge 'LIKELY' and 'MAYBE' layer ------------------------------------------
 '''
-For each SNES/ECNES species, we have rasterised them into two layers: 'LIKELY' and 'MAYBE' (some only has 'LIKELY'), and use
-1 to indicate existence, 0 for non-existence.
+Merge the 'LIKELY' and 'MAYBE' layers to create a "LIKELY_MAYBE" layer, and save to TIFFs.
 
-Here we merge the two layers into a single layer by assiging 0.8 for 'LIKELY' and 0.3 for 'MAYBE'. The merged layer is then saved
-to the '{SNES_ECNES_dir}/Processed/LIKELY_MAYBE_MERGED/' folder. A csv file containing the metadata of the dissolved vector data and paths 
-to the rasterised data is also saved to '{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta_merged.csv'.
-
-Note: The 'LIKELY' and 'MAYBE' layers are not overlapping, 'MAYBE' layers are surrounding the 'LIKELY' layers. So we just need to assign
-0.3 to 'MAYBE' cells and add them to 'LIKELY' layers to get the merged layer.
-
+ - 0: Not present
+ - 0.3 Maybe present
+ - 0.8 Likely present
+ - np.nan: No data
+ 
 '''
 
 # Define the cell values for 'LIKELY' and 'MAYBE'
-bio_raw2val = {2: 0.8, 1: 0.3} # 2 is 'LIKELY', 1 is 'MAYBE'; this is a mapping from raw data to the values we want to assign
-
-# Update the metadata
+bio_raw2val = {2: 0.8, 1: 0.3}  # 2 is 'LIKELY', 1 is 'MAYBE'
 ref_meta.update({'dtype': 'float32', 'nodata': np.nan})
-
-# Read the SNES metadata
 snes_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv')
 
-# Function to merge the 'LIKELY' and 'MAYBE' layers
-def merge_species(in_df): # Suppose in_df is the dataframe for a single species
+
+def fill_edge_overlap(arr, val_to_fill=3, known_vals=[1,2], cutoff=1.5):
+    """
+    Some edge cells will be rasterised both as 1 ('MAYBE') and 2 ('LIKELY'),
+    so we need to fill the these cells with a specific value to avoid overlap.
+    
+    Logic:
+    - If a cell is has a value of 3, then it is an overlapping cell.
+    - We use linear interpolation to calculate value for this cel.
+    - If the interpolated value <  cutoff, we set it to 1 (MAYBE).
+    - If the interpolated value >= cutoff, we set it to 2 (LIKELY).
+    """
+    unknow_mask = (arr == val_to_fill)
+    arr[unknow_mask] = cutoff               # Set the overlapping cells to cutoff to avoid bias focal mean calculation
+    arr = np.where(arr == 0, cutoff, arr)   # Set zero values to cutoff to avoid bias focal mean calculation
+    
+    # Get the average of the surrounding cells
+    kernel = np.ones((3, 3)) / 9
+    focal_mean = convolve2d(arr, kernel, mode='same', boundary='fill', fillvalue=0)
+    
+    # Fill the overlapping cells with the average value
+    fill_val = focal_mean[unknow_mask]
+    fill_val = np.where(fill_val < cutoff, 1, fill_val)  
+    fill_val = np.where(fill_val >= cutoff, 2, fill_val) 
+    
+    arr[unknow_mask] = fill_val
+    arr = np.where(arr == cutoff, 0, arr)  # Set the cutoff values to NaN
+
+    return arr
+
+
+def merge_species(in_df, overlap_val=3):
     arr_merge = []
     for _,row in in_df.iterrows():
-        # Get the raw value and raw save-path
-        raw_val,_ = get_presense_and_save_path(row)
-        # Map the raw value to the new value
         arr = rasterio.open(row['TIF_PATH']).read(1).astype('float32')
-        arr = np.where(arr == 1, bio_raw2val[raw_val], 0)
         arr_merge.append(arr)
-    return np.stack(arr_merge).sum(axis=0)
+        
+    arr = np.stack(arr_merge).sum(axis=0)
+    arr = np.where(arr > overlap_val, 0, arr)  # Remove any values greater than 3 (background cells) to avoid confuse the interpolator
+    
+    if arr.sum() == 0 or (arr == overlap_val).sum() == 0: 
+        pass # pass if no valid data or no overlap
+    else:
+        arr = fill_edge_overlap(arr, overlap_val)
+    
+    for k,v in bio_raw2val.items():
+        arr = np.where(arr == k, v, arr)
+
+    return arr
+
+
 
 
 
@@ -723,7 +766,7 @@ save_paths = pd.DataFrame()
 for _,df in snes_meta.groupby(['SCIENTIFIC_NAME']):
     # Get name and new save-path
     first_row = df.iloc[0]
-    name = first_row['SCIENTIFIC_NAME'].replace('/', '_').replace(' ', '_')
+    name = re.sub(r'[^a-zA-Z0-9]', '_', first_row['SCIENTIFIC_NAME'])
     # Create a new folder to store the merged data
     save_dir = f'{SNES_ECNES_dir}/Processed/LIKELY_MAYBE_MERGED/SNES/{first_row["TAXON_GROUP"]}'
     save_path = f'{save_dir}/{name}.tif'
@@ -734,7 +777,7 @@ for _,df in snes_meta.groupby(['SCIENTIFIC_NAME']):
         arr = merge_species(in_df)
         with rasterio.open(to_path, 'w', **ref_meta) as dst:
             dst.write(arr, 1)
-            
+  
     # Save the merged data
     tasks.append(delayed(merge_save)(df, save_path))
     save_paths = pd.concat([save_paths, pd.DataFrame([{'LISTED_TAXON_ID':first_row['LISTED_TAXON_ID'], 'TIF_PATH':save_path}])])

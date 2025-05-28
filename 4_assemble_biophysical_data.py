@@ -706,7 +706,7 @@ for state in population.keys():
     water_domestic_state[state] = (
         water_use_mining 
         + water_use_manufacturing 
-        + water_use_elec              # Water use for electricity generation is used again downstream, so not included to avoid double counting
+        + water_use_elec
         + water_use_supply_sewerage_drainage
         + water_use_collection_treatment_disposal
         + water_use_other_indus 
@@ -766,8 +766,8 @@ with rasterio.open('N:/Data-Master/Population/australian_population_grid_2011_ti
     water_ues_total_DD = np.bincount(water_DR_arr[water_DR_arr > 0], weights=(water_per_capita * src_pop_arr)[water_DR_arr > 0])
     water_ues_total_RR = np.bincount(water_RR_arr[water_RR_arr > 0], weights=(water_per_capita * src_pop_arr)[water_RR_arr > 0])
 
-    water_ues_total_DD_dict = {('DRIANAGE_REGION',k):[v] for k, v in enumerate(water_ues_total_DD) if k!= 0}
-    water_ues_total_RR_dict = {('RIVER_REGION',k):[v] for k, v in enumerate(water_ues_total_RR) if k!= 0}
+    water_ues_total_DD_dict = {('Drainage Division',k):[v] for k, v in enumerate(water_ues_total_DD) if k!= 0}
+    water_ues_total_RR_dict = {('River Region',k):[v] for k, v in enumerate(water_ues_total_RR) if k!= 0}
     
     out_df = pd.concat([
         pd.DataFrame(water_ues_total_DD_dict).T,
@@ -775,7 +775,7 @@ with rasterio.open('N:/Data-Master/Population/australian_population_grid_2011_ti
     ], axis=0).reset_index()
     
     out_df.columns = ['REGION_TYPE', 'REGION_ID', 'DOMESTIC_INDUSTRIAL_WATER_USE_ML']
-    out_df.to_csv('N:/Data-Master/Water/Water_account/Water_use_DD_RR_ML.csv', index=False)
+    out_df.to_csv('N:/Data-Master/Water/Water_account/Water_Use_Domestic.csv', index=False)
 
 
 
