@@ -2,7 +2,9 @@
 import os, re
 import subprocess
 from textwrap import fill
+from turtle import color
 import netCDF4
+from pyparsing import col
 import rasterio, fiona
 import xarray as xr
 import rioxarray as rxr
@@ -45,9 +47,21 @@ Unalloc_nat_code = 23
 # Read previouse raw data
 ibra_cols = ['IBRA_ID', 'IBRA_SUB_CODE_7', 'IBRA_SUB_NAME_7', 'IBRA_REG_CODE_7', 'IBRA_REG_NAME_7']
 
-zones = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5', key='cell_zones_df', columns=['X', 'Y', 'CELL_HA'] + ibra_cols)
-bioph = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5', key = 'cell_biophysical_df', columns=['NATURAL_AREA_INC_WATER'])
-lumap = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', key = 'cell_LU_mapping', columns=['LU_DESC','LU_ID_LUTO'])
+zones = pd.read_hdf(
+    'N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5', 
+    key='cell_zones_df', 
+    columns=['X', 'Y', 'CELL_HA'] + ibra_cols
+)
+bioph = pd.read_hdf(
+    'N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5', 
+    key = 'cell_biophysical_df', 
+    columns=['NATURAL_AREA_INC_WATER', 'DCCEEW_NCI', 'NATURAL_AREA_CONNECTIVITY']
+)
+lumap = pd.read_hdf(
+    'N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_LU_mapping.h5', 
+    key = 'cell_LU_mapping', 
+    columns=['LU_DESC','LU_ID_LUTO']
+)
 
 
 # Get real area for each cell
@@ -87,13 +101,15 @@ np.place(idx_out_LUTO_natural_2D.values, NLUM.values, idx_out_LUTO_natural.astyp
 
 SSPs = ['ssp126', 'ssp245', 'ssp370', 'ssp585']
 
-# Empty list to store the conservation priority performance data
+
+# ----------------- Calculate the rank2area performance curves for conservation priority data -----------------
+
 GBF2_conserve_performance = pd.DataFrame()
 
 # Get conservation priority raster/csv
 for ssp in SSPs:
     
-    # Read the conservation priority data, select the cells of all Australia
+    # Read the conservation priority data, select the cells of 'inside LUTO study area'
     ly = rxr.open_rasterio(f'{bio_Carla_EnviroSuit_dir}/Zonation/{ssp}/{ssp}_zonation_rank_1km.tif'
         ).squeeze('band'
         ).drop_vars('band'
@@ -111,13 +127,26 @@ for ssp in SSPs:
         ).reset_index(
         ).sort_values('PRIORITY_RANK', ascending=False
         ).assign(
-            AREA_COVERAGE_PERCENT=lambda df: df['area'].astype("float").cumsum() / df['area'].sum() * 100,              # Needs to convert cumsum to float to avoid numerical issues
-            PRIORITY_RANK_CUMSUM_CONTRIBUTION=lambda df: (df['PRIORITY_RANK'].astype("float") * df['area']).cumsum() / (df['PRIORITY_RANK'] * df['area']).sum() * 100,
+            AREA_COVERAGE_PERCENT=(
+                lambda df: 
+                    df['area'].astype("float").cumsum()     # Needs to convert cumsum to float to avoid numerical issues
+                    / df['area'].sum() 
+                    * 100
+                ),              
+            PRIORITY_RANK_CUMSUM_CONTRIBUTION=(
+                lambda df: 
+                    (df['PRIORITY_RANK'].astype("float") * df['area']).cumsum() 
+                    / (df['PRIORITY_RANK'] * df['area']).sum() * 100
+                ),
             ssp=ssp
         ).drop(columns=['area', 'cell'])
     
     # Select rows with AREA_COVERAGE_PERCENT closest to integer values from 0 to 100
-    ly_stats = ly_stats.iloc[abs((np.arange(101)).reshape(-1, 1) - ly_stats['AREA_COVERAGE_PERCENT'].values).argmin(axis=1)].copy()
+    ly_stats = ly_stats.iloc[
+        abs(
+            np.arange(101).reshape(-1, 1) 
+            - ly_stats['AREA_COVERAGE_PERCENT'].values
+        ).argmin(axis=1)].copy()
     ly_stats['AREA_COVERAGE_PERCENT'] = np.arange(101)
     
     # Save the conservation priority data to the array
@@ -129,7 +158,6 @@ with pd.ExcelWriter(f'{bio_Carla_NetCDF_dir}/GBF2_conserve_performance.xlsx') as
     for ssp, df in GBF2_conserve_performance.groupby('ssp'):
         df = df[['AREA_COVERAGE_PERCENT', 'PRIORITY_RANK', 'PRIORITY_RANK_CUMSUM_CONTRIBUTION']]
         df.to_excel(writer, sheet_name=ssp, index=False)
-
 
 
 
@@ -838,105 +866,6 @@ ecnes_meta_merged.to_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta_merged.c
 
 
 
-# ------------------- Apply Zonation algorithm to merged data ------------------------------------------
-
-zonation_exe = f'C:/Program Files (x86)/Zonation5/z5.exe'
-snes_merged_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta_merged.csv')['TIF_PATH'].values
-ecnes_merged_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta_merged.csv')['TIF_PATH'].values
-
-
-snes_merged_tifs = pd.read_csv(f'N:/Data-Master/Biodiversity/DCCEEW/SNES_ECNES/Processed/Supersede/DCCEEW_SNES_meta_merged.csv')
-snes_merged_tifs['TIF_PATH'] = snes_merged_tifs['TIF_PATH'].str.replace('SNES_GEOTIFF', 'SNES_ECNES/Processed/Supersede', regex=False)
-snes_merged_tifs = snes_merged_tifs['TIF_PATH'].values
-
-valid_tif = []
-for i in tqdm(snes_merged_tifs, total=len(snes_merged_tifs)):
-    if not os.path.exists(i):
-        print(f'{i} does not exist')
-        continue
-    try:
-        with rasterio.open(i) as src:
-            pass
-    except Exception as e:
-        print(f'{i} is not a valid TIF file: {e}')
-        continue
-    
-    valid_tif.append(i)
-
-snes_merged_tifs = valid_tif
-
-
-
-
-
-# Save the TIF path to txt files
-with open(f'{SNES_ECNES_dir}/Processed/Zonation/SNES_files.txt', 'w') as f_snes,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_files.txt', 'w', encoding='utf-8') as f_ecnes:
-    f_snes.write('filename\n')
-    f_snes.write('\n'.join(snes_merged_tifs))
-    f_ecnes.write('filename\n')
-    f_ecnes.write('\n'.join(ecnes_merged_tifs))
-    
-    
-# Create mask and hierarchy TIF
-with rasterio.open(snes_merged_tifs[0]) as src:
-    meta = src.meta.copy()
-    meta.update({
-        'dtype': 'uint8',
-        'nodata': 0,
-        'compress': 'lzw',
-        'count': 1,
-        'width': NLUM.rio.width,
-        'height': NLUM.rio.height,
-        'transform': NLUM.rio.transform(),
-    })
-    
-    zone_mask = NLUM.values.astype('uint8')
-    zone_hierarchy = ((zone_mask == 1) * (idx_in_LUTO_2D == 0)).astype('uint8')
-    
-    with rasterio.open(f'{SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif', 'w', **meta) as zone_hierarchy_dst,\
-         rasterio.open(f'{SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif', 'w', **meta) as zone_mask_dst:
-        zone_hierarchy_dst.write(zone_hierarchy, 1)
-        zone_mask_dst.write(zone_mask, 1)
-
-
-# Create the zonation settings file
-with open(f'{SNES_ECNES_dir}/Processed/Zonation/snes_settings.txt', 'w') as snes_settings,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_settings.txt', 'w', encoding='utf-8') as ecnes_settings:
-         
-    snes_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/SNES_files.txt
-    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
-    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
-    '''.replace('    ', ''))
-    
-    ecnes_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/ECNES_files.txt
-    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
-    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
-    '''.replace('    ', ''))
-
-  
-
-# Execute zonation
-subprocess.run([
-    zonation_exe,
-    '--mode=CAZMAX', 
-    '-ah',
-    f'{SNES_ECNES_dir}/Processed/Zonation/snes_settings.txt',
-    f'{SNES_ECNES_dir}/Processed/Zonation/SNES_Priority_OLD' 
-])
-
-subprocess.run([
-    zonation_exe,
-    '--mode=CAZMAX',
-    '-ah',
-    f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_settings.txt',
-    f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_Priority'
-])
-
-
-
-
-
 # ------------------- Masking merged GEOTIFFs and save to NetCDF ------------------------------------------
 
 # Read DCCEEW SNES GeoTIFF file paths
@@ -1233,6 +1162,123 @@ ECNES_df.to_csv(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES_target.csv', index
 
 
 
+
+
+# ------------------- Apply Zonation algorithm to merged data ------------------------------------------
+
+zonation_exe = f'C:/Program Files (x86)/Zonation5/z5.exe'
+
+snes_likely_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv').query('PRESENCE_RANK == 2')['TIF_PATH'].values
+ecnes_likely_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta.csv').query('PRES_RANK == 2')['TIF_PATH'].values
+snes_likely_may_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta_merged.csv')['TIF_PATH'].values
+ecnes_likely_may_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta_merged.csv')['TIF_PATH'].values
+
+
+# Save the TIF path to txt files
+with open(f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_files.txt', 'w') as f_snes,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_files.txt', 'w') as f_ecnes,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_may_files.txt', 'w') as f_snes_merged,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_files.txt', 'w') as f_ecnes_merged:
+         
+    f_snes.write('filename\n')
+    f_snes.write('\n'.join(snes_likely_tifs))
+    f_ecnes.write('filename\n')
+    f_ecnes.write('\n'.join(ecnes_likely_tifs))
+    f_snes_merged.write('filename\n')
+    f_snes_merged.write('\n'.join(snes_likely_may_tifs))
+    f_ecnes_merged.write('filename\n')
+    f_ecnes_merged.write('\n'.join(ecnes_likely_may_tifs))
+    
+    
+# Create mask and hierarchy TIF
+with rasterio.open(snes_likely_may_tifs[0]) as src:
+    meta = src.meta.copy()
+    meta.update({
+        'dtype': 'uint8',
+        'nodata': 0,
+        'compress': 'lzw',
+        'count': 1,
+        'width': NLUM.rio.width,
+        'height': NLUM.rio.height,
+        'transform': NLUM.rio.transform(),
+    })
+    
+    zone_mask = NLUM.values.astype('uint8')
+    zone_hierarchy = ((zone_mask == 1) * (idx_in_LUTO_2D == 0)).astype('uint8')
+    
+    with rasterio.open(f'{SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif', 'w', **meta) as zone_hierarchy_dst,\
+         rasterio.open(f'{SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif', 'w', **meta) as zone_mask_dst:
+        zone_hierarchy_dst.write(zone_hierarchy, 1)
+        zone_mask_dst.write(zone_mask, 1)
+
+
+# Create the zonation settings file
+with open(f'{SNES_ECNES_dir}/Processed/Zonation/snes_likely_settings.txt', 'w') as snes_likely_settings,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_likely_settings.txt', 'w') as ecnes_likely_settings,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/snes_likely_may_settings.txt', 'w') as snes_likely_may_settings,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_likely_may_settings.txt', 'w') as ecnes_likely_may_settings:
+         
+    snes_likely_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/SNES_likely_files.txt
+    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
+    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
+    '''.replace('    ', ''))
+    
+    ecnes_likely_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_files.txt
+    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
+    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
+    '''.replace('    ', ''))
+    
+    snes_likely_may_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/SNES_likely_may_files.txt
+    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
+    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
+    '''.replace('    ', ''))
+    
+    ecnes_likely_may_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_files.txt
+    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
+    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
+    '''.replace('    ', ''))
+
+  
+
+# Execute zonation
+subprocess.run([
+    zonation_exe,
+    '--mode=CAZMAX', 
+    '-ah',
+    f'{SNES_ECNES_dir}/Processed/Zonation/snes_likely_settings.txt',
+    f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_Priority' 
+])
+
+subprocess.run([
+    zonation_exe,
+    '--mode=CAZMAX',
+    '-ah',
+    f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_likely_settings.txt',
+    f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_Priority'
+])
+
+subprocess.run([
+    zonation_exe,
+    '--mode=CAZMAX',
+    '-ah',
+    f'{SNES_ECNES_dir}/Processed/Zonation/snes_likely_may_settings.txt',
+    f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_may_Priority'
+])
+
+subprocess.run([
+    zonation_exe,
+    '--mode=CAZMAX',
+    '-ah',
+    f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_likely_may_settings.txt',
+    f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_Priority'
+])
+
+
+
+
+
+
+
 ################################################################################
 #           Process Vegetation Data (NVIS)  (GBF3) with Xarray                 #
 ################################################################################
@@ -1472,4 +1518,3 @@ csv_files = {
 with pd.ExcelWriter(NVIS_SAVE_path + '/BIODIVERSITY_GBF3_SCORES_AND_TARGETS.xlsx') as writer:
     for sheet_name, df in csv_files.items():
         df.to_excel(writer, sheet_name=sheet_name, index=False)
-

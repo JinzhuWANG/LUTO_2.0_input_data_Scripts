@@ -424,21 +424,21 @@ print('Number of NaNs =', cell_df[cell_df.isna().any(axis=1)].shape[0])
 ################################ Read NRM regions shapefile in to GeoPandas GeoDataFrame, convert to raster to match NLUM, save, join to cell_df dataframe
    
 # Import shapefile to GeoPandas DataFrame
-NRM_gdf = gpd.read_file('N:/Data-Master/Australian_administrative_boundaries/nrm_2016_aus/nrm_gda94.shp')
+NRM_gdf = gpd.read_file('N:/Data-Master/Australian_administrative_boundaries/nrm_2025_aus/Natural_Resource_Management_Regions/Natural_Resource_Management_Regions.shp')
 
-# Fix up an attribute error in the data
-rw = NRM_gdf['CODE'] == 304310
-NRM_gdf.loc[rw, 'NHT2NAME'] = 'Northern Gulf'
-NRM_gdf.loc[rw, 'CODE'] = 310
+# # Fix up an attribute error in the data
+# rw = NRM_gdf['CODE'] == 304310
+# NRM_gdf.loc[rw, 'NHT2NAME'] = 'Northern Gulf'
+# NRM_gdf.loc[rw, 'CODE'] = 310
 
 # Downcast CODE for conversion to raster
-NRM_gdf['CODE'] = pd.to_numeric(NRM_gdf['CODE'], downcast='integer')
+NRM_gdf['NRM_ID'] = pd.to_numeric(NRM_gdf['NRM_ID'], downcast='integer')
 
 # Access geometry and field to rasterise
-shapes = ((geom, value) for geom, value in zip(NRM_gdf.geometry, NRM_gdf.CODE)) 
+shapes = ((geom, value) for geom, value in zip(NRM_gdf.geometry, NRM_gdf.NRM_ID)) 
 
 # Open a new GeoTiFF file
-with rasterio.open('N:/Data-Master/Australian_administrative_boundaries/nrm_2016_aus/NRM_raster_filled.tif', 'w+', dtype='int32', nodata='0', **meta) as out:
+with rasterio.open('N:/Data-Master/Australian_administrative_boundaries/nrm_2025_aus/NRM_raster_filled.tif', 'w+', dtype='int32', nodata='0', **meta) as out:
     
     # Rasterise NRM shapefile
     newrast = features.rasterize(shapes = shapes, fill = 0, out = out.read(1), transform = out.transform)
@@ -461,18 +461,17 @@ cell_df['NRM_CODE'] = NRM_raster_clipped[NLUM_mask]
 cell_df['NRM_CODE'] = pd.to_numeric(cell_df['NRM_CODE'], downcast='integer')
 
 # Simplify the table for merging
-tmp = NRM_gdf.groupby(['CODE'], as_index = False)[['NHT2NAME']].first().sort_values(by = ['CODE'])
+tmp = NRM_gdf.groupby(['NRM_ID'], as_index = False)[['NRM_REGION']].first().sort_values(by = ['NRM_ID'])
 
 # Join NRM name to the cell_df data frame
-cell_df = cell_df.merge(tmp, how = 'left', left_on = 'NRM_CODE', right_on = 'CODE')
-cell_df = cell_df.drop(columns = ['CODE'])
-cell_df.rename(columns = {'NHT2NAME':'NRM_NAME'}, inplace = True)
+cell_df = cell_df.merge(tmp, how = 'left', left_on = 'NRM_CODE', right_on = 'NRM_ID')
+cell_df = cell_df.drop(columns = ['NRM_ID'])
+cell_df.rename(columns = {'NRM_REGION':'NRM_NAME'}, inplace = True)
 
 # Plot and print out data, check that there are no NaNs
 cell_df.info()
 print('Number of grid cells =', cell_df.shape[0])
 print('Number of NaNs =', cell_df[cell_df.isna().any(axis = 1)].shape[0])
-
 
 
 
@@ -906,8 +905,6 @@ print('Number of NaNs =', cell_df[cell_df.isna().any(axis = 1)].shape[0])
 
 # Export to HDF5 file
 cell_df.to_hdf(cell_df_path + cell_df_fn + '.h5', key = cell_df_fn, mode = 'w', format = 't')
-
-
 
 
 

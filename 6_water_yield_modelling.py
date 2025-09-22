@@ -3,10 +3,11 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import rasterio, matplotlib, h5py, os
+import rasterio, matplotlib, h5py, os, netCDF4
+import xarray as xr
+
 from rasterio.fill import fillnodata
 from rasterio.warp import calculate_default_transform, reproject, Resampling
-import concurrent.futures as cf
 from ftplib import FTP
 from itertools import product
 from multiprocessing import Pool
@@ -46,10 +47,12 @@ def map_in_2D(col, data): # data = 'continuous' or 'categorical'
 
 # Convert object columns to categories and downcast int64 columns to save memory and space
 def downcast(dframe):
-    obj_cols = dframe.select_dtypes(include = ["object"]).columns
+    obj_cols = dframe.select_dtypes(include = ['object']).columns
     dframe[obj_cols] = dframe[obj_cols].astype('category')
-    int64_cols = dframe.select_dtypes(include = ["int64"]).columns
-    dframe[int64_cols] = dframe[int64_cols].apply(pd.to_numeric, downcast = 'integer')
+    int_cols = dframe.select_dtypes(include = ['integer']).columns
+    dframe[int_cols] = dframe[int_cols].apply(pd.to_numeric, downcast = 'integer')
+    fcols = dframe.select_dtypes('float').columns
+    dframe[fcols] = dframe[fcols].apply(pd.to_numeric, downcast = 'float')
 
 
 
@@ -382,6 +385,84 @@ if __name__ == '__main__':
     # AWC_mean = (AWC_brick[0, :] * 5 + AWC_brick[1, :] * 10 + AWC_brick[2, :] * 15 + AWC_brick[3, :] * 30 + AWC_brick[4, :] * 40 + AWC_brick[5, :] * 100) / 200
     # with rasterio.open('N:/Data-Master/Water/Water_yield_modelling/AWC_mean.tif', 'w+', dtype = 'float32', nodata = -99, **meta) as out:
     #     out.write_band(1, conv_1D_to_2D(AWC_mean))   
+    
+    
+    
+    ############## Water use by SHALLOW-ROOTED and DEEP_ROOTED plants from INVEST modelling
+    
+    cell_df = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5')
+
+    # Adding historical water yield for short-rooted and deep-rooted vegetation from the GCM ensemble mean for ssp245
+    pth = 'N:/Data-Master/Water/Water_yield_modelling/Water_yield_projections/HDF5/'
+    fn = 'Water_yield_GCM-Ensemble_ssp245_1970-2100_DR_ML_HA_mean'
+
+    with h5py.File(pth + fn + '.h5', 'r') as h5:
+        cell_df['WATER_YIELD_HIST_DR_ML_HA'] = h5[fn][15, :] # Column 15 is 1985 which is the historical mean 1970 - 2000
+        
+    fn = 'Water_yield_GCM-Ensemble_ssp245_1970-2100_SR_ML_HA_mean'
+    with h5py.File(pth + fn + '.h5', 'r') as h5:
+        cell_df['WATER_YIELD_HIST_SR_ML_HA'] = h5[fn][15, :]
+        
+    # Adding NVIS Pre-European Major Vegetation Groups
+    with rasterio.open('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif') as rst:
+        NLUM_mask = rst.read(1)
+        meta = rst.meta.copy()
+        meta.update(compress = 'lzw', driver = 'GTiff', dtype = 'float32', nodata = -9999)
+        array_2D = np.zeros(NLUM_mask.shape, dtype = np.float32) 
+        xy = tuple([a.astype(np.int16) for a in np.nonzero(NLUM_mask == 1)])
+    
+
+
+    # % Pre-European Deep-Rooted Vegetation - NVIS Pre-European Major Vegetation Groups  
+    """
+    Calculate the proportion of each cell which was originally covered by deep-rooted vegetation as a basis for calculating baseline water yield based on NVIS Pre-European Major Vegetation Groups.
+    Table 7 NVIS Structural Formation Terminology https://www.dcceew.gov.au/sites/default/files/documents/australian-vegetation-attribute-manual-v70.pdf
+    """
+    
+    nvis_df = pd.read_csv('N:/Data-Master/NVIS/Processed/NVIS7_0_AUST_PRE_MVG_ALB_lookup.csv')
+    nvis_name2id = nvis_df.set_index('NAME')['Value'].to_dict()
+    
+    nvis_pre = xr.load_dataset('N:/Data-Master/NVIS/Processed/NVIS7_0_AUST_PRE_MVG.nc')['data']
+    nvis_pre = nvis_pre.assign_coords(group_id=('group', nvis_pre['group'].to_series().apply(lambda x: nvis_name2id[x]).values))
+    
+    
+    nvis_deep_root_portion = {
+        (1, 15, 23):0.8,              # Closed forest
+        (2, 3, 4, 30): 0.65,          # Open forest
+        (6, 7, 8, 9, 10): 0.35,       # Forest/woodlands
+        (5, 12, 14, 16, 17): 0.35,    # Woodlands/shrublands
+        (11, 13, 18, 31, 32): 0.2,    # Open woodlands/heathlands
+        (19, 20, 21, 22, 26): 0.0     # Grasslands
+    }
+    
+    
+    cell_df['DEEP_ROOTED_PROPORTION'] = 0.0
+    cell_df['WATER_YIELD_HIST_BASELINE_ML_HA'] = 0.0
+    for k,v in nvis_deep_root_portion.items():
+        deep_proportion = nvis_pre.sel(group=nvis_pre['group_id'].isin(k)).sum(dim='group') / 100 * v # convert from percentage to proportion
+        cell_df['DEEP_ROOTED_PROPORTION'] += deep_proportion
+        cell_df['WATER_YIELD_HIST_BASELINE_ML_HA'] += cell_df['WATER_YIELD_HIST_DR_ML_HA'] * deep_proportion + cell_df['WATER_YIELD_HIST_SR_ML_HA'] * (1 - deep_proportion)
+
+    with rasterio.open('N:/Data-Master/Water/Water_yield_modelling/Water_yield_projections/GeoTiff/deep_root_proportion_new.tif', 'w+',  **meta) as out:
+        out.write_band(1, conv_1D_to_2D(cell_df['DEEP_ROOTED_PROPORTION']))
+        
+    with rasterio.open('N:/Data-Master/Water/Water_yield_modelling/Water_yield_projections/GeoTiff/water_yield_baseline_new.tif', 'w+',  **meta) as out:
+        out.write_band(1, conv_1D_to_2D(cell_df['WATER_YIELD_HIST_BASELINE_ML_HA']))
+    
+    # Downcast to save memory and space
+    downcast(cell_df)
+    
+    # Write dataframe to HDF5
+    cell_df.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5', key = 'cell_biophysical_df', mode = 'w', format = 'table')
+
+    
+    
+    
+    
+    
+    
+    
+    
     
     
     
