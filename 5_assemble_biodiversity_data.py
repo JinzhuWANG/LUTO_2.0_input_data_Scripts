@@ -1,10 +1,8 @@
 
 import os, re
 import subprocess
-from textwrap import fill
-from turtle import color
-import netCDF4
-from pyparsing import col
+from matplotlib.table import Cell
+import netCDF4 # necessary for xarray to read/write netCDF files
 import rasterio, fiona
 import xarray as xr
 import rioxarray as rxr
@@ -32,21 +30,24 @@ from affine import Affine
 NLUM = rxr.open_rasterio('N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif').squeeze('band').drop_vars('band').astype('uint8') 
 NLUM_zero = NLUM.copy() * 0
 
+
+# Paths
 bio_Carla_EnviroSuit_dir = 'N:/Data-Master/Biodiversity/Environmental-suitability'
 bio_Carla_GTIFF_dir  = f'{bio_Carla_EnviroSuit_dir}/Annual-species-suitability_20-year_snapshots_5km'
 bio_Carla_NetCDF_dir = f'{bio_Carla_EnviroSuit_dir}/Annual-species-suitability_20-year_snapshots_5km_to_NetCDF'
 
 SNES_ECNES_dir = 'N:/Data-Master/Biodiversity/DCCEEW/SNES_ECNES'
-
 NVIS_PRE_1750_path = 'N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL'
 NVIS_SAVE_path = 'N:/Data-Master/NVIS/Processed'
-
 HCAS_condition = 'N:/Data-Master/Habitat_condition_assessment_system/Data/Processed/HABITAT_CONDITION.csv'
-Unalloc_nat_code = 23
+IBRA_save_path = 'N:/Data-Master/Australian_administrative_boundaries/ibra7_2019_aus/processed'
 
-# Read previouse raw data
+
+# Constants
+Unalloc_nat_code = 23
 ibra_cols = ['IBRA_ID', 'IBRA_SUB_CODE_7', 'IBRA_SUB_NAME_7', 'IBRA_REG_CODE_7', 'IBRA_REG_NAME_7']
 
+# Upstream data
 zones = pd.read_hdf(
     'N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5', 
     key='cell_zones_df', 
@@ -92,73 +93,6 @@ idx_in_LUTO_2D = NLUM_zero.copy()
 np.place(idx_in_LUTO_2D.values, NLUM.values, idx_in_LUTO.astype('uint8'))
 idx_out_LUTO_natural_2D = NLUM_zero.copy()
 np.place(idx_out_LUTO_natural_2D.values, NLUM.values, idx_out_LUTO_natural.astype('uint8'))
-
-
-
-###############################################################################################
-#                  Process Speciese Conservation Priority data (GBF2) with Xarray             #
-###############################################################################################
-
-SSPs = ['ssp126', 'ssp245', 'ssp370', 'ssp585']
-
-
-# ----------------- Calculate the rank2area performance curves for conservation priority data -----------------
-
-GBF2_conserve_performance = pd.DataFrame()
-
-# Get conservation priority raster/csv
-for ssp in SSPs:
-    
-    # Read the conservation priority data, select the cells of 'inside LUTO study area'
-    ly = rxr.open_rasterio(f'{bio_Carla_EnviroSuit_dir}/Zonation/{ssp}/{ssp}_zonation_rank_1km.tif'
-        ).squeeze('band'
-        ).drop_vars('band'
-        ).sel(
-            x=xr.DataArray(zones['X'].values, dims='cell', coords={'cell':zones.index}), 
-            y=xr.DataArray(zones['Y'].values, dims='cell', coords={'cell':zones.index}), 
-            method='nearest', 
-            drop=True
-        ).assign_coords(area=('cell', real_area_ha)
-        ).drop_vars(['x', 'y', 'spatial_ref'])
-
-    # Select cells inside LUTO study area, calculate the conservation priority statistics
-    ly_stats = ly.sel(cell=idx_in_LUTO
-        ).to_dataframe(name='PRIORITY_RANK'
-        ).reset_index(
-        ).sort_values('PRIORITY_RANK', ascending=False
-        ).assign(
-            AREA_COVERAGE_PERCENT=(
-                lambda df: 
-                    df['area'].astype("float").cumsum()     # Needs to convert cumsum to float to avoid numerical issues
-                    / df['area'].sum() 
-                    * 100
-                ),              
-            PRIORITY_RANK_CUMSUM_CONTRIBUTION=(
-                lambda df: 
-                    (df['PRIORITY_RANK'].astype("float") * df['area']).cumsum() 
-                    / (df['PRIORITY_RANK'] * df['area']).sum() * 100
-                ),
-            ssp=ssp
-        ).drop(columns=['area', 'cell'])
-    
-    # Select rows with AREA_COVERAGE_PERCENT closest to integer values from 0 to 100
-    ly_stats = ly_stats.iloc[
-        abs(
-            np.arange(101).reshape(-1, 1) 
-            - ly_stats['AREA_COVERAGE_PERCENT'].values
-        ).argmin(axis=1)].copy()
-    ly_stats['AREA_COVERAGE_PERCENT'] = np.arange(101)
-    
-    # Save the conservation priority data to the array
-    GBF2_conserve_performance = pd.concat([GBF2_conserve_performance, ly_stats])
-
-
-# Save csv to Excel
-with pd.ExcelWriter(f'{bio_Carla_NetCDF_dir}/GBF2_conserve_performance.xlsx') as writer:
-    for ssp, df in GBF2_conserve_performance.groupby('ssp'):
-        df = df[['AREA_COVERAGE_PERCENT', 'PRIORITY_RANK', 'PRIORITY_RANK_CUMSUM_CONTRIBUTION']]
-        df.to_excel(writer, sheet_name=ssp, index=False)
-
 
 
 
@@ -1166,28 +1100,36 @@ ECNES_df.to_csv(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES_target.csv', index
 
 # ------------------- Apply Zonation algorithm to merged data ------------------------------------------
 
-zonation_exe = f'C:/Program Files (x86)/Zonation5/z5.exe'
+zonation_exe = 'C:/Program Files (x86)/Zonation5/z5.exe'
 
 snes_likely_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv').query('PRESENCE_RANK == 2')['TIF_PATH'].values
 ecnes_likely_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta.csv').query('PRES_RANK == 2')['TIF_PATH'].values
 snes_likely_may_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta_merged.csv')['TIF_PATH'].values
 ecnes_likely_may_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta_merged.csv')['TIF_PATH'].values
+mnes_likely_tifs = snes_likely_tifs.tolist() + ecnes_likely_tifs.tolist()
+mnes_likely_may_tifs = snes_likely_may_tifs.tolist() + ecnes_likely_may_tifs.tolist()
 
 
 # Save the TIF path to txt files
-with open(f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_files.txt', 'w') as f_snes,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_files.txt', 'w') as f_ecnes,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_may_files.txt', 'w') as f_snes_merged,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_files.txt', 'w') as f_ecnes_merged:
+with open(f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_files.txt', 'w') as f_snes_likely,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_files.txt', 'w') as f_ecnes_likely,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_may_files.txt', 'w') as f_snes_likely_may,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_files.txt', 'w') as f_ecnes_likely_may,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_files.txt', 'w') as f_mnes_likely,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_may_files.txt', 'w') as f_mnes_likely_may:
          
-    f_snes.write('filename\n')
-    f_snes.write('\n'.join(snes_likely_tifs))
-    f_ecnes.write('filename\n')
-    f_ecnes.write('\n'.join(ecnes_likely_tifs))
-    f_snes_merged.write('filename\n')
-    f_snes_merged.write('\n'.join(snes_likely_may_tifs))
-    f_ecnes_merged.write('filename\n')
-    f_ecnes_merged.write('\n'.join(ecnes_likely_may_tifs))
+    f_snes_likely.write('filename\n')
+    f_snes_likely.write('\n'.join(snes_likely_tifs))
+    f_ecnes_likely.write('filename\n')
+    f_ecnes_likely.write('\n'.join(ecnes_likely_tifs))
+    f_snes_likely_may.write('filename\n')
+    f_snes_likely_may.write('\n'.join(snes_likely_may_tifs))
+    f_ecnes_likely_may.write('filename\n')
+    f_ecnes_likely_may.write('\n'.join(ecnes_likely_may_tifs))
+    f_mnes_likely.write('filename\n')
+    f_mnes_likely.write('\n'.join(mnes_likely_tifs))
+    f_mnes_likely_may.write('filename\n')
+    f_mnes_likely_may.write('\n'.join(mnes_likely_may_tifs))
     
     
 # Create mask and hierarchy TIF
@@ -1216,7 +1158,9 @@ with rasterio.open(snes_likely_may_tifs[0]) as src:
 with open(f'{SNES_ECNES_dir}/Processed/Zonation/snes_likely_settings.txt', 'w') as snes_likely_settings,\
      open(f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_likely_settings.txt', 'w') as ecnes_likely_settings,\
      open(f'{SNES_ECNES_dir}/Processed/Zonation/snes_likely_may_settings.txt', 'w') as snes_likely_may_settings,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_likely_may_settings.txt', 'w') as ecnes_likely_may_settings:
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_likely_may_settings.txt', 'w') as ecnes_likely_may_settings,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/mnes_likely_settings.txt', 'w') as mnes_likely_settings,\
+     open(f'{SNES_ECNES_dir}/Processed/Zonation/mnes_likely_may_settings.txt', 'w') as mnes_likely_may_settings:
          
     snes_likely_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/SNES_likely_files.txt
     analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
@@ -1234,6 +1178,16 @@ with open(f'{SNES_ECNES_dir}/Processed/Zonation/snes_likely_settings.txt', 'w') 
     '''.replace('    ', ''))
     
     ecnes_likely_may_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_files.txt
+    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
+    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
+    '''.replace('    ', ''))
+    
+    mnes_likely_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/MNES_likely_files.txt
+    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
+    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
+    '''.replace('    ', ''))
+    
+    mnes_likely_may_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/MNES_likely_may_files.txt
     analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
     hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
     '''.replace('    ', ''))
@@ -1273,8 +1227,157 @@ subprocess.run([
     f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_Priority'
 ])
 
+subprocess.run([
+    zonation_exe,
+    '--mode=CAZMAX',
+    '-ah',  
+    f'{SNES_ECNES_dir}/Processed/Zonation/mnes_likely_settings.txt',
+    f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_Priority'
+])
+
+subprocess.run([
+    zonation_exe,
+    '--mode=CAZMAX',
+    '-ah',
+    f'{SNES_ECNES_dir}/Processed/Zonation/mnes_likely_may_settings.txt',
+    f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_may_Priority'
+])
 
 
+# Merge all zonation layers and save as NetCDF
+zonation_layers = {
+    'ECNES_likely_may': f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_Priority/rankmap.tif',
+    'ECNES_likely': f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_Priority/rankmap.tif',
+    'SNES_likely_may': f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_may_Priority/rankmap.tif',
+    'SNES_likely': f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_Priority/rankmap.tif',
+    'MNES_likely_may': f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_may_Priority/rankmap.tif',
+    'MNES_likely': f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_Priority/rankmap.tif',
+}
+
+zonation_arr = xr.DataArray(
+    np.zeros((len(zonation_layers), NLUM.sum().item()), dtype=np.float32),
+    dims=['layer', 'cell'],
+    coords={'layer':list(zonation_layers.keys()), 'cell':np.arange(NLUM.sum().item())}
+)
+
+for layer, path in zonation_layers.items():
+    with rasterio.open(path) as src:
+        arr = src.read(1)
+        arr = arr[np.nonzero(NLUM.values)]
+        zonation_arr.loc[dict(layer=layer)] = arr
+    
+
+# Save to nc
+zonation_arr.name = 'data'
+zonation_arr.to_netcdf(
+    f'{SNES_ECNES_dir}/Processed/bio_NES_Zonation.nc',
+    mode='w', 
+    encoding={'data': {
+        "compression": "gzip", 
+        "compression_opts": 9,
+        "dtype": 'float32'
+        },
+    },
+    engine='h5netcdf'
+)
+
+
+
+###############################################################################################
+#                  Process Speciese Conservation Priority data (GBF2) with Xarray             #
+###############################################################################################
+
+
+# ----------------- Calculate the rank2area performance curves for conservation priority data -----------------
+
+GBF2_conserve_performance = pd.DataFrame()
+
+# Get conservation priority raster/csv
+for ssp in ['ssp126', 'ssp245', 'ssp370', 'ssp585']:
+    
+    # Read the conservation priority data, select the cells of 'inside LUTO study area'
+    ly = rxr.open_rasterio(f'{bio_Carla_EnviroSuit_dir}/Zonation/{ssp}/{ssp}_zonation_rank_1km.tif'
+        ).squeeze('band'
+        ).drop_vars('band'
+        ).sel(
+            x=xr.DataArray(zones['X'].values, dims='cell', coords={'cell':zones.index}), 
+            y=xr.DataArray(zones['Y'].values, dims='cell', coords={'cell':zones.index}), 
+            method='nearest', 
+            drop=True
+        ).assign_coords(area=('cell', real_area_ha)
+        ).drop_vars(['x', 'y', 'spatial_ref'])
+
+    # Select cells inside LUTO study area, calculate the conservation priority statistics
+    ly_stats = ly.sel(cell=idx_in_LUTO
+        ).to_dataframe(name='PRIORITY_RANK'
+        ).reset_index(
+        ).sort_values('PRIORITY_RANK', ascending=False
+        ).assign(
+            AREA_COVERAGE_PERCENT=(
+                lambda df: 
+                    df['area'].astype("float").cumsum()     # Needs to convert cumsum to float to avoid numerical issues
+                    / df['area'].sum() 
+                    * 100
+                ),              
+            PRIORITY_RANK_CUMSUM_CONTRIBUTION=(
+                lambda df: 
+                    (df['PRIORITY_RANK'].astype("float") * df['area']).cumsum() 
+                    / (df['PRIORITY_RANK'] * df['area']).sum() * 100
+                ),
+            source=ssp
+        ).drop(columns=['area', 'cell'])
+    
+    # Select rows with AREA_COVERAGE_PERCENT closest to integer values from 0 to 100
+    ly_stats = ly_stats.iloc[
+        abs(np.arange(101).reshape(-1, 1)  - ly_stats['AREA_COVERAGE_PERCENT'].values).argmin(axis=1)].copy()
+    ly_stats['AREA_COVERAGE_PERCENT'] = np.arange(101)
+    
+    # Save the conservation priority data to the array
+    GBF2_conserve_performance = pd.concat([GBF2_conserve_performance, ly_stats])
+    
+    
+# Get conservation priority raster/csv
+for nes in ['ECNES_likely_may', 'ECNES_likely', 'SNES_likely_may', 'SNES_likely', 'MNES_likely_may', 'MNES_likely' ]:
+    
+    ly = rxr.open_rasterio(f'{SNES_ECNES_dir}/Processed/Zonation/{nes}_Priority/rankmap.tif'
+        ).squeeze('band'
+        ).drop_vars('band'
+        ).sel(
+            x=xr.DataArray(zones['X'].values, dims='cell', coords={'cell':zones.index}), 
+            y=xr.DataArray(zones['Y'].values, dims='cell', coords={'cell':zones.index}),
+            method='nearest', 
+            drop=True 
+        ).assign_coords(area=('cell', real_area_ha)
+        ).drop_vars(['x', 'y', 'spatial_ref'])
+    ly_stats = ly.sel(cell=idx_in_LUTO
+        ).to_dataframe(name='PRIORITY_RANK'
+        ).reset_index(
+        ).sort_values('PRIORITY_RANK', ascending=False
+        ).assign(
+            AREA_COVERAGE_PERCENT=(
+                lambda df: 
+                    df['area'].astype("float").cumsum()     # Needs to convert cumsum to float to avoid numerical issues
+                    / df['area'].sum() 
+                    * 100
+                ),              
+            PRIORITY_RANK_CUMSUM_CONTRIBUTION=(
+                lambda df: 
+                    (df['PRIORITY_RANK'].astype("float") * df['area']).cumsum() 
+                    / (df['PRIORITY_RANK'] * df['area']).sum() * 100
+                ),
+            source=nes
+        ).drop(columns=['area', 'cell'])
+    ly_stats = ly_stats.iloc[
+        abs(np.arange(101).reshape(-1, 1) - ly_stats['AREA_COVERAGE_PERCENT'].values).argmin(axis=1)].copy()
+    ly_stats['AREA_COVERAGE_PERCENT'] = np.arange(101)
+    GBF2_conserve_performance = pd.concat([GBF2_conserve_performance, ly_stats])
+
+
+# Save csv to Excel
+with pd.ExcelWriter(f'{SNES_ECNES_dir}/Processed/GBF2_conserve_performance.xlsx') as writer:
+    for source, df in GBF2_conserve_performance.groupby('source'):
+        df = df[['AREA_COVERAGE_PERCENT', 'PRIORITY_RANK', 'PRIORITY_RANK_CUMSUM_CONTRIBUTION']]
+        df.to_excel(writer, sheet_name=source, index=False)
 
 
 
@@ -1396,13 +1499,6 @@ for gdb_path, layer_raster, layer_attribute in files:
 
 # --------------- Remove invalid vegetation class; Apply spatial mask ---------------
 
-# Get group names for both pre-European and extant vegetation
-PRE_mvg_groups = pd.read_csv(f'{NVIS_SAVE_path}/NVIS7_0_AUST_PRE_MVG_ALB_lookup.csv')['NAME'].tolist()
-PRE_mvs_groups = pd.read_csv(f'{NVIS_SAVE_path}/NVIS7_0_AUST_PRE_MVS_ALB_lookup.csv')['NAME'].tolist()
-EXT_mvg_groups = pd.read_csv(f'{NVIS_SAVE_path}/NVIS7_0_AUST_EXT_MVG_ALB_lookup.csv')['NAME'].tolist()
-EXT_mvs_groups = pd.read_csv(f'{NVIS_SAVE_path}/NVIS7_0_AUST_EXT_MVS_ALB_lookup.csv')['NAME'].tolist()
-
-
 # Some groups are undertmined and should be exclude from the analysis, such as 'Other ...', 'Unknown/no data', and 'Unclassified'.
 rm_names = ['Unknown/no data', 'Unknown/No data']
 
@@ -1415,7 +1511,7 @@ for gdb_path, layer_raster, layer_attribute in files:
     dst_array_xr = dst_array_xr.sel(group=~dst_array_xr.group.isin(rm_names))
     
     # Reorder the groups lexicographically
-    dst_array_xr = dst_array_xr.sortby('group').assign_coords(IBRA_ID=(['cell'], zones['IBRA_ID'].values))
+    dst_array_xr = dst_array_xr.sortby('group')
     
     # Save xarray DataArray to NetCDF
     encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}}
@@ -1435,41 +1531,31 @@ for gdb_path, layer_raster, layer_attribute in files:
 NVIS_pre_mvg_xr = xr.load_dataarray(f'{NVIS_SAVE_path}/NVIS7_0_AUST_PRE_MVG.nc') / 100  # Convert percentage to fraction
 NVIS_pre_mvs_xr = xr.load_dataarray(f'{NVIS_SAVE_path}/NVIS7_0_AUST_PRE_MVS.nc') / 100  # Convert percentage to fraction
 
-# Get the NVIS names
-NVIS_pre_mvg_names = NVIS_pre_mvg_xr.coords['group'].values.tolist()
-NVIS_pre_mvs_names = NVIS_pre_mvs_xr.coords['group'].values.tolist()
 
-# Total vegataion area (ha) pre-1750 
+# Total vegataion area (ha) pre-1750
 NVIS_pre_mvg_total_ha = NVIS_pre_mvg_xr * zones['CELL_HA'].values[None, :]
 NVIS_pre_mvs_total_ha = NVIS_pre_mvs_xr * zones['CELL_HA'].values[None, :]
 NVIS_pre_mvg_total_ha_df = NVIS_pre_mvg_total_ha.sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA').reset_index()
 NVIS_pre_mvs_total_ha_df = NVIS_pre_mvs_total_ha.sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA').reset_index()
-NVIS_pre_mvg_total_ha_IBRA = NVIS_pre_mvg_total_ha.groupby('IBRA_ID').sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_ALL_HA').query('AREA_WEIGHTED_SCORE_ALL_HA > 0').reset_index()
-NVIS_pre_mvs_total_ha_IBRA = NVIS_pre_mvs_total_ha.groupby('IBRA_ID').sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_ALL_HA').query('AREA_WEIGHTED_SCORE_ALL_HA > 0').reset_index()
 
-# Vegataion area outside the LUTO study area 
-NVIS_pre_mvg_outside_ha = NVIS_pre_mvg_xr.sel(cell=idx_out_LUTO_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_natural]     
-NVIS_pre_mvs_outside_ha = NVIS_pre_mvs_xr.sel(cell=idx_out_LUTO_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_natural]     
+
+# Vegataion area outside the LUTO study area
+NVIS_pre_mvg_outside_ha = NVIS_pre_mvg_xr.sel(cell=idx_out_LUTO_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_natural]
+NVIS_pre_mvs_outside_ha = NVIS_pre_mvs_xr.sel(cell=idx_out_LUTO_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_natural]
 NVIS_pre_mvg_outside_ha_df = NVIS_pre_mvg_outside_ha.sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA').reset_index()
 NVIS_pre_mvs_outside_ha_df = NVIS_pre_mvs_outside_ha.sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA').reset_index()
-NVIS_pre_mvg_outside_ha_IBRA = NVIS_pre_mvg_outside_ha.groupby('IBRA_ID').sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA').query('AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA > 0').reset_index()
-NVIS_pre_mvs_outside_ha_IBRA = NVIS_pre_mvs_outside_ha.groupby('IBRA_ID').sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA').query('AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA > 0').reset_index()
 
 
-# Vegataion area inside the LUTO study area 
+# Vegataion area inside the LUTO study area
 NVIS_pre_mvg_inside_ha = NVIS_pre_mvg_xr.sel(cell=idx_in_LUTO) * zones['CELL_HA'].values[None, idx_in_LUTO] * biodiv_degrade_ly[idx_in_LUTO]
 NVIS_pre_mvs_inside_ha = NVIS_pre_mvs_xr.sel(cell=idx_in_LUTO) * zones['CELL_HA'].values[None, idx_in_LUTO] * biodiv_degrade_ly[idx_in_LUTO]
 NVIS_pre_mvg_inside_ha_df = NVIS_pre_mvg_inside_ha.sum(dim='cell').to_dataframe('AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA').reset_index()
 NVIS_pre_mvs_inside_ha_df = NVIS_pre_mvs_inside_ha.sum(dim='cell').to_dataframe('AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA').reset_index()
-NVIS_pre_mvs_inside_ha_IBRA = NVIS_pre_mvs_inside_ha.groupby('IBRA_ID').sum(dim='cell').to_dataframe('AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA').query('AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA > 0').reset_index()
-NVIS_pre_mvg_inside_ha_IBRA = NVIS_pre_mvg_inside_ha.groupby('IBRA_ID').sum(dim='cell').to_dataframe('AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA').query('AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA > 0').reset_index()
 
 
-# Concatenate the two dataframes
+# Concatenate the dataframes
 NVIS_pre_mvg = NVIS_pre_mvg_total_ha_df.merge(NVIS_pre_mvg_outside_ha_df, on='group').merge(NVIS_pre_mvg_inside_ha_df, on='group')
-NVIS_pre_mvs = NVIS_pre_mvs_total_ha_df.merge(NVIS_pre_mvs_outside_ha_df, on='group').merge( NVIS_pre_mvs_inside_ha_df, on='group')
-NVIS_pre_mvg_IBRA = NVIS_pre_mvg_total_ha_IBRA.merge(NVIS_pre_mvg_outside_ha_IBRA, on=['IBRA_ID','group']).merge(NVIS_pre_mvg_inside_ha_IBRA, on=['IBRA_ID','group'])
-NVIS_pre_mvs_IBRA = NVIS_pre_mvs_total_ha_IBRA.merge(NVIS_pre_mvs_outside_ha_IBRA, on=['IBRA_ID','group']).merge(NVIS_pre_mvs_inside_ha_IBRA, on=['IBRA_ID','group'])
+NVIS_pre_mvs = NVIS_pre_mvs_total_ha_df.merge(NVIS_pre_mvs_outside_ha_df, on='group').merge(NVIS_pre_mvs_inside_ha_df, on='group')
 
 
 # Calculate the percentage of base-year biodiversity socre to pre-1750 level of the base year
@@ -1481,14 +1567,6 @@ NVIS_pre_mvs.insert(1, 'BASE_YR_PERCENT', NVIS_pre_mvs.eval(
     '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
     / AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA * 100'))
 
-NVIS_pre_mvg_IBRA.insert(2, 'BASE_YR_PERCENT', NVIS_pre_mvg_IBRA.eval(
-    '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
-    / AREA_WEIGHTED_SCORE_ALL_HA * 100'))
-
-NVIS_pre_mvs_IBRA.insert(2, 'BASE_YR_PERCENT', NVIS_pre_mvs_IBRA.eval(
-    '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
-    / AREA_WEIGHTED_SCORE_ALL_HA * 100'))
-
 
 # Append a user-defined target column
 NVIS_pre_mvg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', 50)
@@ -1499,22 +1577,116 @@ NVIS_pre_mvs.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', 50)
 NVIS_pre_mvs.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', 50)
 NVIS_pre_mvs.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', 30)
 
-NVIS_pre_mvg_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
-NVIS_pre_mvg_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
-NVIS_pre_mvg_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
-
-NVIS_pre_mvs_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
-NVIS_pre_mvs_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
-NVIS_pre_mvs_IBRA.insert(3, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
-
 # Combine all CSVs and save them to Excel
 csv_files = {
     'NVIS_MVG': NVIS_pre_mvg,
-    'NVIS_MVS': NVIS_pre_mvs,
-    'NVIS_MVG_IBRA': NVIS_pre_mvg_IBRA,
-    'NVIS_MVS_IBRA': NVIS_pre_mvs_IBRA
+    'NVIS_MVS': NVIS_pre_mvs
 }
 
-with pd.ExcelWriter(NVIS_SAVE_path + '/BIODIVERSITY_GBF3_SCORES_AND_TARGETS.xlsx') as writer:
+with pd.ExcelWriter(NVIS_SAVE_path + '/BIODIVERSITY_GBF3_NVIS_SCORES_AND_TARGETS.xlsx') as writer:
     for sheet_name, df in csv_files.items():
         df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+
+
+#######################################################################################################
+#      Interim Biogeographic Regionalisation for Australia (IBRA)  (GBF3) with Xarray                 #
+#######################################################################################################
+
+IBRA_reg_all = zones.groupby(['IBRA_REG_NAME_7'], observed=True
+    )[['CELL_HA']].sum(
+    ).reset_index(
+    ).rename(
+        columns={
+            'IBRA_REG_NAME_7': 'IBRA_REG_NAME',
+            'CELL_HA': 'AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA'
+        }
+    )
+IBRA_reg_in_LUTO = (zones['CELL_HA'][idx_in_LUTO] * biodiv_degrade_ly[idx_in_LUTO]
+    ).reset_index(
+    ).set_index(zones['IBRA_REG_NAME_7'][idx_in_LUTO]
+    ).groupby(['IBRA_REG_NAME_7'], observed=True
+    )[['CELL_HA']].sum(
+    ).reset_index(
+    ).rename(
+        columns={
+            'IBRA_REG_NAME_7': 'IBRA_REG_NAME',
+            'CELL_HA': 'AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA'
+        }
+    )
+IBRA_reg_out_LUTO_natural = zones.loc[idx_out_LUTO_natural].groupby(['IBRA_REG_NAME_7'], observed=True
+    )[['CELL_HA']].sum(
+    ).reset_index(
+    ).rename(
+        columns={
+            'IBRA_REG_NAME_7': 'IBRA_REG_NAME',
+            'CELL_HA': 'AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA'
+        }
+    )
+
+IBRA_sub_all = zones.groupby(['IBRA_SUB_NAME_7'], observed=True
+    )[['CELL_HA']].sum(
+    ).reset_index(
+    ).rename(
+        columns={
+            'IBRA_SUB_NAME_7': 'IBRA_SUBREG_NAME',
+            'CELL_HA': 'AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA'
+        }
+    )
+IBRA_sub_in_LUTO = (zones['CELL_HA'][idx_in_LUTO] * biodiv_degrade_ly[idx_in_LUTO]
+    ).reset_index(
+    ).set_index(zones['IBRA_SUB_NAME_7'][idx_in_LUTO]
+    ).groupby(['IBRA_SUB_NAME_7'], observed=True
+    )[['CELL_HA']].sum(
+    ).reset_index(
+    ).rename(
+        columns={
+            'IBRA_SUB_NAME_7': 'IBRA_SUBREG_NAME',
+            'CELL_HA': 'AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA'
+        }
+    )
+IBRA_sub_out_LUTO_natural = zones.loc[idx_out_LUTO_natural].groupby(['IBRA_SUB_NAME_7'], observed=True
+    )[['CELL_HA']].sum(
+    ).reset_index(
+    ).rename(
+        columns={
+            'IBRA_SUB_NAME_7': 'IBRA_SUBREG_NAME',
+            'CELL_HA': 'AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA'
+        }
+    )
+
+# Merge the dataframes
+IBRA_reg = IBRA_reg_all.merge(IBRA_reg_in_LUTO, on='IBRA_REG_NAME').merge(IBRA_reg_out_LUTO_natural, on='IBRA_REG_NAME').rename(columns={'IBRA_REG_NAME':'Region'})
+IBRA_sub = IBRA_sub_all.merge(IBRA_sub_in_LUTO, on='IBRA_SUBREG_NAME').merge(IBRA_sub_out_LUTO_natural, on='IBRA_SUBREG_NAME').rename(columns={'IBRA_SUBREG_NAME':'Region'})
+
+# Calculate the percentage of base-year biodiversity socre to pre-1750 level of the base year
+IBRA_reg.insert(1, 'BASE_YR_PERCENT', IBRA_reg.eval(
+    '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
+    / AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA * 100'))
+IBRA_sub.insert(1, 'BASE_YR_PERCENT', IBRA_sub.eval(
+    '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
+    / AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA * 100'))
+
+
+# Append a user-defined target column
+IBRA_reg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', 50)
+IBRA_reg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', 50)
+IBRA_reg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', 30)
+IBRA_sub.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', 50)
+IBRA_sub.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', 50)
+IBRA_sub.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', 30)
+
+# Combine all CSVs and save them to Excel
+csv_files = {
+    'IBRA_Regions': IBRA_reg,
+    'IBRA_Subregions': IBRA_sub
+}
+
+with pd.ExcelWriter(IBRA_save_path + '/BIODIVERSITY_GBF3_IBRA_SCORES_AND_TARGETS.xlsx') as writer:
+    for sheet_name, df in csv_files.items():
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+
+
+
+

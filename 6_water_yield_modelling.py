@@ -3,7 +3,8 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import rasterio, matplotlib, h5py, os, netCDF4
+import rasterio, matplotlib, h5py, os
+import netCDF4 # necessary for loading xarray package
 import xarray as xr
 
 from rasterio.fill import fillnodata
@@ -51,9 +52,6 @@ def downcast(dframe):
     dframe[obj_cols] = dframe[obj_cols].astype('category')
     int_cols = dframe.select_dtypes(include = ['integer']).columns
     dframe[int_cols] = dframe[int_cols].apply(pd.to_numeric, downcast = 'integer')
-    fcols = dframe.select_dtypes('float').columns
-    dframe[fcols] = dframe[fcols].apply(pd.to_numeric, downcast = 'float')
-
 
 
 
@@ -390,7 +388,7 @@ if __name__ == '__main__':
     
     ############## Water use by SHALLOW-ROOTED and DEEP_ROOTED plants from INVEST modelling
     
-    cell_df = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5')
+    cell_df = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df')
 
     # Adding historical water yield for short-rooted and deep-rooted vegetation from the GCM ensemble mean for ssp245
     pth = 'N:/Data-Master/Water/Water_yield_modelling/Water_yield_projections/HDF5/'
@@ -441,7 +439,8 @@ if __name__ == '__main__':
     for k,v in nvis_deep_root_portion.items():
         deep_proportion = nvis_pre.sel(group=nvis_pre['group_id'].isin(k)).sum(dim='group') / 100 * v # convert from percentage to proportion
         cell_df['DEEP_ROOTED_PROPORTION'] += deep_proportion
-        cell_df['WATER_YIELD_HIST_BASELINE_ML_HA'] += cell_df['WATER_YIELD_HIST_DR_ML_HA'] * deep_proportion + cell_df['WATER_YIELD_HIST_SR_ML_HA'] * (1 - deep_proportion)
+    
+    cell_df['WATER_YIELD_HIST_BASELINE_ML_HA'] = cell_df['WATER_YIELD_HIST_DR_ML_HA'] * deep_proportion + cell_df['WATER_YIELD_HIST_SR_ML_HA'] * (1 - deep_proportion)
 
     with rasterio.open('N:/Data-Master/Water/Water_yield_modelling/Water_yield_projections/GeoTiff/deep_root_proportion_new.tif', 'w+',  **meta) as out:
         out.write_band(1, conv_1D_to_2D(cell_df['DEEP_ROOTED_PROPORTION']))
@@ -449,15 +448,8 @@ if __name__ == '__main__':
     with rasterio.open('N:/Data-Master/Water/Water_yield_modelling/Water_yield_projections/GeoTiff/water_yield_baseline_new.tif', 'w+',  **meta) as out:
         out.write_band(1, conv_1D_to_2D(cell_df['WATER_YIELD_HIST_BASELINE_ML_HA']))
     
-    # Downcast to save memory and space
-    downcast(cell_df)
-    
     # Write dataframe to HDF5
     cell_df.to_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5', key = 'cell_biophysical_df', mode = 'w', format = 'table')
-
-    
-    
-    
     
     
     

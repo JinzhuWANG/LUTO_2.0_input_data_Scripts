@@ -3,3 +3,4 @@
 .pylint.d/**
 .spyproject/**
 __pycache__/
+.claude/settings.local.json
