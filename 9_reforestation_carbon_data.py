@@ -1,13 +1,8 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-import geopandas as gpd
+import xarray as xr
 import numpy as np
-# from scipy import ndimage as nd
-import rasterio, matplotlib, itertools, h5py
-from rasterio import features
-from rasterio.fill import fillnodata
-from rasterio.warp import reproject
-from rasterio.enums import Resampling
+import rasterio, matplotlib
 
 
 ############################################################################################################################################
@@ -81,6 +76,16 @@ rip_area_prop = ((rip_length * buffer_dist) / 10000) / cell_ha
 
 
 
+'''
+Key logic:
+
+- Soil carbon is reported as change in soil carbon, so subtract the initial value from all years
+  This makes it only consider the carbon sequestered after planting, not the initial carbon stock.
+
+- Instead of using HDF5, here use xarray to export to NetCDF so we keep the dimension names for ease of use later.
+'''
+
+
 ########### Environmental plantings (block, riparian, and belt planting arrangements)
 
 # Set cap on amount of carbon in tonnes per hectare
@@ -109,21 +114,36 @@ ep_belt_array[:, 0, :] = np.where(ep_belt_array[:, 0, :] > max_tree_C, max_tree_
 ep_belt_array[:, 1, :] = np.where(ep_belt_array[:, 1, :] > max_debris_C, max_debris_C, ep_belt_array[:, 1, :]) * 44 / 12 
 ep_belt_array[:, 2, :] = np.where(ep_belt_array[:, 2, :] > max_soil_C, max_soil_C, ep_belt_array[:, 2, :]) * 44 / 12 
 
-# Export to HDF5
-with h5py.File(outpath + 'tCO2_ha_ep_block.h5', 'w') as h5f:
-    h5f.create_dataset('Trees_tCO2_ha', data = ep_block_array[:, 0, :], chunks = True)
-    h5f.create_dataset('Debris_tCO2_ha', data = ep_block_array[:, 1, :], chunks = True)
-    h5f.create_dataset('Soil_tCO2_ha', data = ep_block_array[:, 2, :], chunks = True)
+# Export to NetCDF
+co2e_EP_block = xr.Dataset({
+    'EP_BLOCK_TREES_TOT_T_CO2_HA': (('age', 'cell'), ep_block_array[:, 0, :]),
+    'EP_BLOCK_DEBRIS_TOT_T_CO2_HA': (('age', 'cell'), ep_block_array[:, 1, :]),
+    'EP_BLOCK_SOIL_TOT_T_CO2_HA': (('age', 'cell'), ep_block_array[:, 2, :] - ep_block_array[0:1, 2, :]), 
+})
+co2e_EP_block.to_netcdf(
+    outpath + 'tCO2_ha_ep_block.nc',
+    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 6956407)} for var in co2e_EP_block.data_vars}
+)
 
-with h5py.File(outpath + 'tCO2_ha_ep_rip.h5', 'w') as h5f:
-    h5f.create_dataset('Trees_tCO2_ha', data = ep_rip_array[:, 0, :], chunks = True)
-    h5f.create_dataset('Debris_tCO2_ha', data = ep_rip_array[:, 1, :], chunks = True)
-    h5f.create_dataset('Soil_tCO2_ha', data = ep_rip_array[:, 2, :], chunks = True)
-    
-with h5py.File(outpath + 'tCO2_ha_ep_belt.h5', 'w') as h5f:
-    h5f.create_dataset('Trees_tCO2_ha', data = ep_belt_array[:, 0, :], chunks = True)
-    h5f.create_dataset('Debris_tCO2_ha', data = ep_belt_array[:, 1, :], chunks = True)
-    h5f.create_dataset('Soil_tCO2_ha', data = ep_belt_array[:, 2, :], chunks = True)
+co2e_EP_rip = xr.Dataset({
+    'EP_RIP_TREES_T_CO2_HA': (('age', 'cell'), ep_rip_array[:, 0, :]),
+    'EP_RIP_DEBRIS_T_CO2_HA': (('age', 'cell'), ep_rip_array[:, 1, :]),
+    'EP_RIP_SOIL_T_CO2_HA': (('age', 'cell'), ep_rip_array[:, 2, :] - ep_rip_array[0:1, 2, :]),
+})
+co2e_EP_rip.to_netcdf(
+    outpath + 'tCO2_ha_ep_rip.nc',
+    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 6956407)} for var in co2e_EP_rip.data_vars}
+)
+
+co2e_EP_belt = xr.Dataset({
+    'EP_BELT_TREES_T_CO2_HA': (('age', 'cell'), ep_belt_array[:, 0, :]),
+    'EP_BELT_DEBRIS_T_CO2_HA': (('age', 'cell'), ep_belt_array[:, 1, :]),
+    'EP_BELT_SOIL_T_CO2_HA': (('age', 'cell'), ep_belt_array[:, 2, :] - ep_belt_array[0:1, 2, :]),
+})
+co2e_EP_belt.to_netcdf(
+    outpath + 'tCO2_ha_ep_belt.nc',
+    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 6956407)} for var in co2e_EP_belt.data_vars}
+)
 
 
 
@@ -153,16 +173,26 @@ cp_belt_array[:, 0, :] = np.where(cp_belt_array[:, 0, :] > max_tree_C, max_tree_
 cp_belt_array[:, 1, :] = np.where(cp_belt_array[:, 1, :] > max_debris_C, max_debris_C, cp_belt_array[:, 1, :]) * 44 / 12 
 cp_belt_array[:, 2, :] = np.where(cp_belt_array[:, 2, :] > max_soil_C, max_soil_C, cp_belt_array[:, 2, :]) * 44 / 12 
 
-# Export to HDF5
-with h5py.File(outpath + 'tCO2_ha_cp_block.h5', 'w') as h5f:
-    h5f.create_dataset('Trees_tCO2_ha', data = cp_block_array[:, 0, :], chunks = True)
-    h5f.create_dataset('Debris_tCO2_ha', data = cp_block_array[:, 1, :], chunks = True)
-    h5f.create_dataset('Soil_tCO2_ha', data = cp_block_array[:, 2, :], chunks = True)
-    
-with h5py.File(outpath + 'tCO2_ha_cp_belt.h5', 'w') as h5f:
-    h5f.create_dataset('Trees_tCO2_ha', data = cp_belt_array[:, 0, :], chunks = True)
-    h5f.create_dataset('Debris_tCO2_ha', data = cp_belt_array[:, 1, :], chunks = True)
-    h5f.create_dataset('Soil_tCO2_ha', data = cp_belt_array[:, 2, :], chunks = True)
+# Export to NetCDF
+co2e_CP_block = xr.Dataset({
+    'CP_BLOCK_TREES_T_CO2_HA': (('age', 'cell'), cp_block_array[:, 0, :]),
+    'CP_BLOCK_DEBRIS_T_CO2_HA': (('age', 'cell'), cp_block_array[:, 1, :]),
+    'CP_BLOCK_SOIL_T_CO2_HA': (('age', 'cell'), cp_block_array[:, 2, :] - cp_block_array[0:1, 2, :]),
+})
+co2e_CP_block.to_netcdf(
+    outpath + 'tCO2_ha_cp_block.nc',
+    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 6956407)} for var in co2e_CP_block.data_vars}
+)
+
+co2e_CP_belt = xr.Dataset({
+    'CP_BELT_TREES_T_CO2_HA': (('age', 'cell'), cp_belt_array[:, 0, :]),
+    'CP_BELT_DEBRIS_T_CO2_HA': (('age', 'cell'), cp_belt_array[:, 1, :]),
+    'CP_BELT_SOIL_T_CO2_HA': (('age', 'cell'), cp_belt_array[:, 2, :] - cp_belt_array[0:1, 2, :]),
+})
+co2e_CP_belt.to_netcdf(
+    outpath + 'tCO2_ha_cp_belt.nc',
+    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 6956407)} for var in co2e_CP_belt.data_vars}
+)
 
 
 ########### Human-induced regeneration (block arrangement)
@@ -192,17 +222,58 @@ hir_rip_array[:, 0, :] = np.where(hir_rip_array[:, 0, :] > max_tree_C, max_tree_
 hir_rip_array[:, 1, :] = np.where(hir_rip_array[:, 1, :] > max_debris_C, max_debris_C, hir_rip_array[:, 1, :]) * 44 / 12 
 hir_rip_array[:, 2, :] = np.where(hir_rip_array[:, 2, :] > max_soil_C, max_soil_C, hir_rip_array[:, 2, :]) * 44 / 12 
 
-# Export to HDF5
-with h5py.File(outpath + 'tCO2_ha_hir_block.h5', 'w') as h5f:
-    h5f.create_dataset('Trees_tCO2_ha', data = hir_array[:, 0, :], chunks = True)
-    h5f.create_dataset('Debris_tCO2_ha', data = hir_array[:, 1, :], chunks = True)
-    h5f.create_dataset('Soil_tCO2_ha', data = hir_array[:, 2, :], chunks = True)
+# Export to NetCDF
+co2e_HIR_block = xr.Dataset({
+    'HIR_BLOCK_TREES_T_CO2_HA': (('age', 'cell'), hir_array[:, 0, :]),
+    'HIR_BLOCK_DEBRIS_T_CO2_HA': (('age', 'cell'), hir_array[:, 1, :]),
+    'HIR_BLOCK_SOIL_T_CO2_HA': (('age', 'cell'), hir_array[:, 2, :] - hir_array[0:1, 2, :]),
+})
+co2e_HIR_block.to_netcdf(
+    outpath + 'tCO2_ha_hir_block.nc',
+    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 6956407)} for var in co2e_HIR_block.data_vars}
+)
 
-with h5py.File(outpath + 'tCO2_ha_hir_rip.h5', 'w') as h5f:
-    h5f.create_dataset('Trees_tCO2_ha', data = hir_rip_array[:, 0, :], chunks = True)
-    h5f.create_dataset('Debris_tCO2_ha', data = hir_rip_array[:, 1, :], chunks = True)
-    h5f.create_dataset('Soil_tCO2_ha', data = hir_rip_array[:, 2, :], chunks = True)
+co2e_HIR_rip = xr.Dataset({
+    'HIR_RIP_TREES_T_CO2_HA': (('age', 'cell'), hir_rip_array[:, 0, :]),
+    'HIR_RIP_DEBRIS_T_CO2_HA': (('age', 'cell'), hir_rip_array[:, 1, :]),
+    'HIR_RIP_SOIL_T_CO2_HA': (('age', 'cell'), hir_rip_array[:, 2, :] - hir_rip_array[0:1, 2, :]),
+})
+co2e_HIR_rip.to_netcdf(
+    outpath + 'tCO2_ha_hir_rip.nc',
+    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 6956407)} for var in co2e_HIR_rip.data_vars}
+)
 
+
+
+# Save the output to GeoTiff - TOTAL CO2 sequestration
+gpath = 'N:/Data-Master/FullCAM/Output_TOT_CO2_HA_GeoTiffs/'
+
+# Helper function to save xarray dataset variables as multiband GeoTIFFs
+def save_dataset_as_multiband_tiffs(dataset, output_path, meta):
+    """Save each variable in an xarray dataset as a multiband GeoTIFF where each band is an age/time step"""
+    for var_name in dataset.data_vars:
+        # Get the data array for this variable (shape: age x cell)
+        data_array = dataset[var_name].values
+        n_bands = data_array.shape[0]
+
+        # Update metadata for multiband output
+        meta_multiband = meta.copy()
+        meta_multiband.update(count=n_bands, dtype='float32', nodata=-99)
+
+        # Write multiband GeoTIFF
+        output_file = output_path + f'{var_name}.tif'
+        with rasterio.open(output_file, 'w', **meta_multiband) as dst:
+            for band_idx in range(n_bands):
+                # Convert 1D cell data to 2D spatial array and write to band (1-indexed)
+                dst.write_band(band_idx + 1, conv_1D_to_2D(data_array[band_idx, :]))
+
+# Save all datasets as multiband GeoTIFFs
+save_dataset_as_multiband_tiffs(co2e_EP_block, gpath, meta)
+save_dataset_as_multiband_tiffs(co2e_EP_rip, gpath, meta)
+save_dataset_as_multiband_tiffs(co2e_EP_belt, gpath, meta)
+save_dataset_as_multiband_tiffs(co2e_CP_block, gpath, meta)
+save_dataset_as_multiband_tiffs(co2e_CP_belt, gpath, meta)
+save_dataset_as_multiband_tiffs(co2e_HIR_block, gpath, meta)
 
 
     

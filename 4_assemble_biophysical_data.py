@@ -1,4 +1,5 @@
 import os
+import xarray as xr
 import pandas as pd
 import matplotlib.pyplot as plt
 import geopandas as gpd
@@ -109,93 +110,6 @@ with rasterio.open('N:/Data-Master/ANUCLIM_climate_data/AUS_9sec_climate_data_20
     # Round and add data to cell_df dataframe
     cell_df['AVG_AN_PREC_MM_YR'] = np.round(dataFlat).astype(np.uint16)
 
-
-
-
-############## Average annual carbon sequestration by reforestation land uses
-
-path = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/3D_Spatial_Timeseries/'
-gpath = 'N:/Data-Master/FullCAM/Output_TOT_CO2_HA_GeoTiffs/'
-
-# This takes the total stand forest growth by 2100 (i.e., index 90)
-# Note that soil carbon is the marginal change in soil carbon resulting from tree planting from 2010 to 2100 rather than the total accumulated SOC.
-# This ensures additional SOC sequestration only is considered.
-with h5py.File(path + 'tCO2_ha_ep_block.h5', 'r') as h5f:
-    cell_df['EP_BLOCK_TREES_T_CO2_HA'] = h5f['Trees_tCO2_ha'][-1]
-    cell_df['EP_BLOCK_DEBRIS_T_CO2_HA'] = h5f['Debris_tCO2_ha'][-1]
-    cell_df['EP_BLOCK_SOIL_T_CO2_HA'] = (h5f['Soil_tCO2_ha'][-1] - h5f['Soil_tCO2_ha'][0])
-
-with h5py.File(path + 'tCO2_ha_ep_rip.h5', 'r') as h5f:
-    cell_df['EP_RIP_TREES_T_CO2_HA'] = h5f['Trees_tCO2_ha'][-1]
-    cell_df['EP_RIP_DEBRIS_T_CO2_HA'] = h5f['Debris_tCO2_ha'][-1]
-    cell_df['EP_RIP_SOIL_T_CO2_HA'] = (h5f['Soil_tCO2_ha'][-1] - h5f['Soil_tCO2_ha'][0])
-
-with h5py.File(path + 'tCO2_ha_ep_belt.h5', 'r') as h5f:
-    cell_df['EP_BELT_TREES_T_CO2_HA'] = h5f['Trees_tCO2_ha'][-1]
-    cell_df['EP_BELT_DEBRIS_T_CO2_HA'] = h5f['Debris_tCO2_ha'][-1]
-    cell_df['EP_BELT_SOIL_T_CO2_HA'] = (h5f['Soil_tCO2_ha'][-1] - h5f['Soil_tCO2_ha'][0])
-
-with h5py.File(path + 'tCO2_ha_cp_block.h5', 'r') as h5f:
-    cell_df['CP_BLOCK_TREES_T_CO2_HA'] = h5f['Trees_tCO2_ha'][-1]
-    cell_df['CP_BLOCK_DEBRIS_T_CO2_HA'] = h5f['Debris_tCO2_ha'][-1]
-    cell_df['CP_BLOCK_SOIL_T_CO2_HA'] = (h5f['Soil_tCO2_ha'][-1] - h5f['Soil_tCO2_ha'][0])
-
-with h5py.File(path + 'tCO2_ha_cp_belt.h5', 'r') as h5f:
-    cell_df['CP_BELT_TREES_T_CO2_HA'] = h5f['Trees_tCO2_ha'][-1]
-    cell_df['CP_BELT_DEBRIS_T_CO2_HA'] = h5f['Debris_tCO2_ha'][-1]
-    cell_df['CP_BELT_SOIL_T_CO2_HA'] = (h5f['Soil_tCO2_ha'][-1] - h5f['Soil_tCO2_ha'][0])
-
-    
-with h5py.File(path + 'tCO2_ha_hir_block.h5', 'r') as h5f:
-    cell_df['HIR_BLOCK_TREES_T_CO2_HA'] = h5f['Trees_tCO2_ha'][-1]
-    cell_df['HIR_BLOCK_DEBRIS_T_CO2_HA'] = h5f['Debris_tCO2_ha'][-1]
-    cell_df['HIR_BLOCK_SOIL_T_CO2_HA'] = (h5f['Soil_tCO2_ha'][-1] - h5f['Soil_tCO2_ha'][0])
-
-
-# Save the output to GeoTiff - TOTAL CO2 sequestration
-with rasterio.open(gpath + 'EP_BLOCK_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BLOCK_TREES_T_CO2_HA']))
-with rasterio.open(gpath + 'EP_BLOCK_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BLOCK_DEBRIS_T_CO2_HA']))
-with rasterio.open(gpath + 'EP_BLOCK_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BLOCK_SOIL_T_CO2_HA']))
-
-with rasterio.open(gpath + 'EP_RIP_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_RIP_TREES_T_CO2_HA']))
-with rasterio.open(gpath + 'EP_RIP_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_RIP_DEBRIS_T_CO2_HA']))
-with rasterio.open(gpath + 'EP_RIP_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_RIP_SOIL_T_CO2_HA']))
-
-with rasterio.open(gpath + 'EP_BELT_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BELT_TREES_T_CO2_HA']))
-with rasterio.open(gpath + 'EP_BELT_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BELT_DEBRIS_T_CO2_HA']))
-with rasterio.open(gpath + 'EP_BELT_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['EP_BELT_SOIL_T_CO2_HA']))
-
-
-with rasterio.open(gpath + 'CP_BLOCK_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BLOCK_TREES_T_CO2_HA']))
-with rasterio.open(gpath + 'CP_BLOCK_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BLOCK_DEBRIS_T_CO2_HA']))
-with rasterio.open(gpath + 'CP_BLOCK_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BLOCK_SOIL_T_CO2_HA']))
-    
-with rasterio.open(gpath + 'CP_BELT_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BELT_TREES_T_CO2_HA']))
-with rasterio.open(gpath + 'CP_BELT_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BELT_DEBRIS_T_CO2_HA']))
-with rasterio.open(gpath + 'CP_BELT_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['CP_BELT_SOIL_T_CO2_HA']))
-
-
-with rasterio.open(gpath + 'HIR_BLOCK_TREES_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_TREES_T_CO2_HA']))
-with rasterio.open(gpath + 'HIR_BLOCK_DEBRIS_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_DEBRIS_T_CO2_HA']))
-with rasterio.open(gpath + 'HIR_BLOCK_SOIL_TOT_T_CO2_HA.tif', 'w+', dtype = 'float32', nodata = -9999, **meta) as dst:        
-    dst.write_band(1, conv_1D_to_2D(cell_df['HIR_BLOCK_SOIL_T_CO2_HA']))
 
 
 
