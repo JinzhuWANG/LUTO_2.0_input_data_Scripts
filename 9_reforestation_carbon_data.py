@@ -59,7 +59,7 @@ def downcast(dframe):
     dframe[f64_cols] = dframe[f64_cols].apply(pd.to_numeric, downcast = 'float')
 
 
-inpath = 'N:/Data-Master/FullCAM/Output_layers/'
+inpath = 'N:/Data-Master/FullCAM/FullCAM_REST_API_GET_DATA_2025/data/processed/Output_GeoTIFFs/'
 outpath = 'N:/Data-Master/LUTO_2.0_input_data/Input_data/3D_Spatial_Timeseries/'
 
 b_df = pd.read_hdf('N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5')
@@ -93,10 +93,21 @@ max_tree_C = 1500
 max_debris_C = 300
 max_soil_C = 500
 
-# Open the numpy array of shape 6956407, 3, 104. Axis 2 is C (t/ha) of trees, debris, soil. Axis 3 is ID, X, Y, then 101 years of simulated data, We want the first 91 years. Ultimate shape is (91, 3, 6956407)
-ep_block_array = np.transpose(np.load(inpath + 'ep_block.npy')[..., 3:94], axes = [2, 1, 0]).astype(np.float32)
-ep_rip_array = np.transpose(np.load(inpath + 'ep_rip.npy')[..., 3:94], axes = [2, 1, 0]).astype(np.float32)
-ep_belt_array = np.transpose(np.load(inpath + 'ep_belt_hd.npy')[..., 3:94], axes = [2, 1, 0]).astype(np.float32)
+# Open the 4D xarray datasets (x, y, YEAR, VARIABLE)
+#   then mask using 2D NLUM_mask (x, y,),
+#   then convert to numpy arrays of shape (age, C type, cell)
+#   The expect shape is (91, 3, 6956407) 
+#   Note, the valid cells only include the "Inside LUTO" study area, which has 4218733 cells
+#   Here keep the cell size as 6956407 to better working with the cell ID system that include all AUS land (i.e., 6956407 cells)
+
+ep_block_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_7_specCat_BeltH.nc')['data']
+ep_rip_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_7_specCat_Water.nc')['data']
+ep_belt_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_7_specCat_BeltH.nc')['data']
+
+ep_block_array = ep_block_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
+ep_rip_array = ep_rip_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
+ep_belt_array = ep_belt_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
+
 
 # Burn in riparian areas
 ep_block_array = (1 - rip_area_prop) * ep_block_array + rip_area_prop * ep_block_array
@@ -114,46 +125,63 @@ ep_belt_array[:, 0, :] = np.where(ep_belt_array[:, 0, :] > max_tree_C, max_tree_
 ep_belt_array[:, 1, :] = np.where(ep_belt_array[:, 1, :] > max_debris_C, max_debris_C, ep_belt_array[:, 1, :]) * 44 / 12 
 ep_belt_array[:, 2, :] = np.where(ep_belt_array[:, 2, :] > max_soil_C, max_soil_C, ep_belt_array[:, 2, :]) * 44 / 12 
 
+
 # Export to NetCDF
+#   Note, for soil carbon, we want to report the change in soil carbon, 
+#   so subtract the initial value from all years. This makes it only 
+#   consider the carbon sequestered after planting, not the initial carbon stock.
 co2e_EP_block = xr.Dataset({
-    'EP_BLOCK_TREES_TOT_T_CO2_HA': (('age', 'cell'), ep_block_array[:, 0, :]),
-    'EP_BLOCK_DEBRIS_TOT_T_CO2_HA': (('age', 'cell'), ep_block_array[:, 1, :]),
-    'EP_BLOCK_SOIL_TOT_T_CO2_HA': (('age', 'cell'), ep_block_array[:, 2, :] - ep_block_array[0:1, 2, :]), 
+    'EP_BLOCK_DEBRIS_T_CO2_HA': (('age', 'cell'), ep_block_array[:, 0, :]),
+    'EP_BLOCK_SOIL_T_CO2_HA': (('age', 'cell'), ep_block_array[:, 1, :] - ep_block_array[0:1, 1, :]),
+    'EP_BLOCK_TREES_T_CO2_HA': (('age', 'cell'), ep_block_array[:, 2, :] ), 
 })
 co2e_EP_block.to_netcdf(
     outpath + 'tCO2_ha_ep_block.nc',
-    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 6956407)} for var in co2e_EP_block.data_vars}
+    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 4096)} for var in co2e_EP_block.data_vars}
 )
 
 co2e_EP_rip = xr.Dataset({
-    'EP_RIP_TREES_T_CO2_HA': (('age', 'cell'), ep_rip_array[:, 0, :]),
-    'EP_RIP_DEBRIS_T_CO2_HA': (('age', 'cell'), ep_rip_array[:, 1, :]),
-    'EP_RIP_SOIL_T_CO2_HA': (('age', 'cell'), ep_rip_array[:, 2, :] - ep_rip_array[0:1, 2, :]),
+    'EP_RIP_DEBRIS_T_CO2_HA': (('age', 'cell'), ep_rip_array[:, 0, :]),
+    'EP_RIP_SOIL_T_CO2_HA': (('age', 'cell'), ep_rip_array[:, 1, :] - ep_rip_array[0:1, 1, :]),
+    'EP_RIP_TREES_T_CO2_HA': (('age', 'cell'), ep_rip_array[:, 2, :]),
 })
 co2e_EP_rip.to_netcdf(
     outpath + 'tCO2_ha_ep_rip.nc',
-    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 6956407)} for var in co2e_EP_rip.data_vars}
+    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 4096)} for var in co2e_EP_rip.data_vars}
 )
 
 co2e_EP_belt = xr.Dataset({
-    'EP_BELT_TREES_T_CO2_HA': (('age', 'cell'), ep_belt_array[:, 0, :]),
-    'EP_BELT_DEBRIS_T_CO2_HA': (('age', 'cell'), ep_belt_array[:, 1, :]),
-    'EP_BELT_SOIL_T_CO2_HA': (('age', 'cell'), ep_belt_array[:, 2, :] - ep_belt_array[0:1, 2, :]),
+    'EP_BELT_DEBRIS_T_CO2_HA': (('age', 'cell'), ep_belt_array[:, 0, :]),
+    'EP_BELT_SOIL_T_CO2_HA': (('age', 'cell'), ep_belt_array[:, 1, :] - ep_belt_array[0:1, 1, :]),
+    'EP_BELT_TREES_T_CO2_HA': (('age', 'cell'), ep_belt_array[:, 2, :]),
 })
 co2e_EP_belt.to_netcdf(
     outpath + 'tCO2_ha_ep_belt.nc',
-    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 6956407)} for var in co2e_EP_belt.data_vars}
+    encoding={var: {'zlib': True, 'complevel': 5, 'chunksizes':(1, 4096)} for var in co2e_EP_belt.data_vars}
 )
 
 
 
 ########### Carbon plantings (block and belt planting arrangements)
 
-# Open the numpy array of shape 6956407, 3, 104. Axis 2 is C (t/ha) of trees, debris, soil. Axis 3 is ID, X, Y, then 101 years of simulated data, We want the first 91 years. Ultimate shape is (91, 3, 6956407)
-mal_block_array = np.transpose(np.load(inpath + 'mal_block.npy')[..., 3:94], axes = [2, 1, 0]).astype(np.float32)
-mal_rip_array = np.transpose(np.load(inpath + 'mal_rip.npy')[..., 3:94], axes = [2, 1, 0]).astype(np.float32)
-mal_belt_array = np.transpose(np.load(inpath + 'mal_belt_hd.npy')[..., 3:94], axes = [2, 1, 0]).astype(np.float32)
-eglob_array = np.transpose(np.load(inpath + 'eglob_lr.npy')[..., 3:94], axes = [2, 1, 0]).astype(np.float32)
+# Open the 4D xarray datasets (x, y, YEAR, VARIABLE) 
+#   then mask using 2D NLUM_mask (x, y,), 
+#   then convert to numpy arrays of shape (age, C type, cell)
+#   The expect shape is (91, 3, 6956407)
+#   Note, the valid cells only include the "Inside LUTO" study area, which has 4218733 cells
+#   Here keep the cell size as 6956407 to better working with the cell ID system that include all AUS land (i.e., 6956407 cells)
+
+
+mal_block_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_8_specCat_Block.nc')['data']
+mal_belt_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_23_specCat_BeltHW.nc')['data']
+eglob_block_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_8_specCat_Block.nc')['data']
+eglob_belt_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_8_specCat_Belt.nc')['data']
+
+mal_block_array = mal_block_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
+mal_belt_array = mal_belt_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
+eglob_block_array = eglob_block_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
+eglob_belt_array = eglob_belt_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
+
 
 # Burn in riparian areas
 mal_block_array = (1 - rip_area_prop) * mal_block_array + rip_area_prop * mal_block_array
@@ -161,8 +189,8 @@ mal_block_array = (1 - rip_area_prop) * mal_block_array + rip_area_prop * mal_bl
 # Smooth out transition from Mallee to E. globulus around 600mm rainfall
 x = (rainfall - 550) / 100
 p = np.where(x > 1, 1, np.where(x < 0, 0, x))
-cp_block_array = (1 - p) * mal_block_array + p * eglob_array
-cp_belt_array = (1 - p) * mal_belt_array + p * eglob_array
+cp_block_array = (1 - p) * mal_block_array + p * eglob_block_array
+cp_belt_array = (1 - p) * mal_belt_array + p * eglob_belt_array
 
 # Cap total carbon per hectare and convert to total CO2e per cell
 cp_block_array[:, 0, :] = np.where(cp_block_array[:, 0, :] > max_tree_C, max_tree_C, cp_block_array[:, 0, :]) * 44 / 12 
@@ -175,9 +203,9 @@ cp_belt_array[:, 2, :] = np.where(cp_belt_array[:, 2, :] > max_soil_C, max_soil_
 
 # Export to NetCDF
 co2e_CP_block = xr.Dataset({
-    'CP_BLOCK_TREES_T_CO2_HA': (('age', 'cell'), cp_block_array[:, 0, :]),
-    'CP_BLOCK_DEBRIS_T_CO2_HA': (('age', 'cell'), cp_block_array[:, 1, :]),
-    'CP_BLOCK_SOIL_T_CO2_HA': (('age', 'cell'), cp_block_array[:, 2, :] - cp_block_array[0:1, 2, :]),
+    'CP_BLOCK_DEBRIS_T_CO2_HA': (('age', 'cell'), cp_block_array[:, 0, :]),
+    'CP_BLOCK_SOIL_T_CO2_HA': (('age', 'cell'), cp_block_array[:, 1, :] - cp_block_array[0:1, 1, :]),
+    'CP_BLOCK_TREES_T_CO2_HA': (('age', 'cell'), cp_block_array[:, 2, :]),
 })
 co2e_CP_block.to_netcdf(
     outpath + 'tCO2_ha_cp_block.nc',
@@ -185,9 +213,9 @@ co2e_CP_block.to_netcdf(
 )
 
 co2e_CP_belt = xr.Dataset({
-    'CP_BELT_TREES_T_CO2_HA': (('age', 'cell'), cp_belt_array[:, 0, :]),
-    'CP_BELT_DEBRIS_T_CO2_HA': (('age', 'cell'), cp_belt_array[:, 1, :]),
-    'CP_BELT_SOIL_T_CO2_HA': (('age', 'cell'), cp_belt_array[:, 2, :] - cp_belt_array[0:1, 2, :]),
+    'CP_BELT_DEBRIS_T_CO2_HA': (('age', 'cell'), cp_belt_array[:, 0, :]),
+    'CP_BELT_SOIL_T_CO2_HA': (('age', 'cell'), cp_belt_array[:, 1, :] - cp_belt_array[0:1, 1, :]),
+    'CP_BELT_TREES_T_CO2_HA': (('age', 'cell'), cp_belt_array[:, 2, :]),
 })
 co2e_CP_belt.to_netcdf(
     outpath + 'tCO2_ha_cp_belt.nc',
