@@ -71,10 +71,11 @@ real_area_ha_2D = NLUM_zero.copy().astype(np.float32)
 np.place(real_area_ha_2D.values, NLUM.values, real_area_ha)
 
 # Get the index of cells that are in natural state, and inside/outside the LUTO study area
-natural_cells = np.logical_not(bioph['NATURAL_AREA_INC_WATER'].values)              # 0 is natural, 1 is non-natural; so we flip the values to make 1 natural
+natural_cells = np.logical_not(bioph['NATURAL_AREA_INC_WATER'].values)              # flip the values to make 1 natural, 0 non-natural
 idx_in_LUTO = np.logical_not(np.isin(lumap['LU_DESC'], ['Non-agricultural land']))  # shape=6956407, sum=4218733
 idx_out_LUTO = np.isin(lumap['LU_DESC'], ['Non-agricultural land'])                 # shape=6956407, sum=2737674
 idx_out_LUTO_natural = idx_out_LUTO & natural_cells                                 # shape=6956407, sum=2677065
+idx_out_LUTO_non_natural = idx_out_LUTO & np.logical_not(natural_cells)             # shape=6956407, sum=60609
 
 
 # Get land-use degradation data
@@ -858,11 +859,13 @@ SNES_arr = xr.open_dataarray(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES.nc', c
 def get_area(arr):
     score_area_weighted_all_Australia = arr * zones['CELL_HA'].values
     score_area_weighted_in_LUTO = arr * idx_in_LUTO * zones['CELL_HA'].values * biodiv_degrade_ly
-    score_area_weighted_out_LUTO = arr * idx_out_LUTO_natural * zones['CELL_HA'].values
+    score_area_weighted_out_LUTO_nat = arr * idx_out_LUTO_natural * zones['CELL_HA'].values
+    score_area_weighted_out_LUTO_non_nat = arr * idx_out_LUTO_non_natural * zones['CELL_HA'].values
     return [{
         'ALL_HA':score_area_weighted_all_Australia.sum(), 
         'IN_LUTO_HA':score_area_weighted_in_LUTO.sum(),
-        'NATURAL_OUT_LUTO_HA':score_area_weighted_out_LUTO.sum()
+        'NATURAL_OUT_LUTO_HA':score_area_weighted_out_LUTO_nat.sum(),
+        'NON_NATURAL_OUT_LUTO_HA':score_area_weighted_out_LUTO_non_nat.sum()
     }]
 
 
@@ -889,14 +892,16 @@ SNES_meta_att = SNES_meta_att.drop(columns=['PRESENCE_CATEGORY', 'PRESENCE_RANK'
 
 # Save the inside/outside LUTO data to csv
 SNES_df = SNES_in_out_LUTO_area.copy()
-SNES_df['HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA'] = SNES_df['ALL_HA']
-SNES_df['HABITAT_SIGNIFICANCE_BASELINE_INSIDE_LUTO_NATURAL'] = SNES_df['IN_LUTO_HA']
-SNES_df['HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL'] = SNES_df['NATURAL_OUT_LUTO_HA']
-SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = SNES_df['IN_LUTO_HA'] + SNES_df['NATURAL_OUT_LUTO_HA']
-SNES_df['HABITAT_SIGNIFICANCE_BASELINE_PERCENT'] = SNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] / SNES_df['ALL_HA'] * 100
+SNES_df['BASELINE_LEVEL_ALL_AUSTRALIA'] = SNES_df['ALL_HA']
+SNES_df['BASEYEAR_LEVEL_INSIDE_LUTO_NATURAL'] = SNES_df['IN_LUTO_HA']
+SNES_df['BASEYEAR_LEVEL_OUT_LUTO_NATURAL'] = SNES_df['NATURAL_OUT_LUTO_HA']
+SNES_df['BASEYEAR_LEVEL_OUT_LUTO_NON_NATURAL'] = SNES_df['NON_NATURAL_OUT_LUTO_HA']
+SNES_df['BASEYEAR_SCORE'] = SNES_df['IN_LUTO_HA'] + SNES_df['NATURAL_OUT_LUTO_HA']
+SNES_df['BASEYEAR_LEVEL'] = SNES_df['BASEYEAR_SCORE'] / SNES_df['ALL_HA'] * 100
+SNES_df['ATTAINABLE_LEVEL'] = (1 - SNES_df['NON_NATURAL_OUT_LUTO_HA'] / SNES_df['ALL_HA']) * 100
 
 # Drop unneeded columns, and split the data into three dataframes based on the PRESENCE_RANK
-SNES_df = SNES_df.drop(columns=['ALL_HA', 'IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA'])
+SNES_df = SNES_df.drop(columns=['ALL_HA', 'IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA', 'NON_NATURAL_OUT_LUTO_HA', 'BASEYEAR_LEVEL_OUT_LUTO_NON_NATURAL', 'BASEYEAR_SCORE'])
 SNES_df_LIKELY = SNES_df.query('PRESENCE_RANK == "LIKELY"').copy().drop(columns=['PRESENCE_RANK'])
 SNES_df_LIKELY_MAYBE = SNES_df.query('PRESENCE_RANK == "LIKELY_AND_MAYBE"').copy().drop(columns=['PRESENCE_RANK'])
 
@@ -905,13 +910,13 @@ SNES_df_LIKELY.columns = [f'{col}_LIKELY' if col != 'SCIENTIFIC_NAME' else 'SCIE
 SNES_df_LIKELY_MAYBE.columns = [f'{col}_LIKELY_MAYBE' if col != 'SCIENTIFIC_NAME' else 'SCIENTIFIC_NAME' for col in SNES_df_LIKELY_MAYBE.columns]
 
 # Add user defined columns to the LIKELY and MAYBE dataframes
-SNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2100_LIKELY', np.nan)
-SNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2050_LIKELY', np.nan)
-SNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2030_LIKELY', np.nan)
+SNES_df_LIKELY.insert(0, 'TARGET_LEVEL_2100_LIKELY', np.nan)
+SNES_df_LIKELY.insert(0, 'TARGET_LEVEL_2050_LIKELY', np.nan)
+SNES_df_LIKELY.insert(0, 'TARGET_LEVEL_2030_LIKELY', np.nan)
 
-SNES_df_LIKELY_MAYBE.insert(0, 'USER_DEFINED_TARGET_PERCENT_2100_LIKELY_MAYBE', np.nan)
-SNES_df_LIKELY_MAYBE.insert(0, 'USER_DEFINED_TARGET_PERCENT_2050_LIKELY_MAYBE', np.nan)
-SNES_df_LIKELY_MAYBE.insert(0, 'USER_DEFINED_TARGET_PERCENT_2030_LIKELY_MAYBE', np.nan)
+SNES_df_LIKELY_MAYBE.insert(0, 'TARGET_LEVEL_2100_LIKELY_MAYBE', np.nan)
+SNES_df_LIKELY_MAYBE.insert(0, 'TARGET_LEVEL_2050_LIKELY_MAYBE', np.nan)
+SNES_df_LIKELY_MAYBE.insert(0, 'TARGET_LEVEL_2030_LIKELY_MAYBE', np.nan)
 
 # Merge the LIKELY and MAYBE dataframes, and append the shared attributes
 SNES_df = SNES_df_LIKELY.merge(SNES_df_LIKELY_MAYBE, on='SCIENTIFIC_NAME', how='outer')
@@ -920,24 +925,26 @@ SNES_df = SNES_df.merge(SNES_meta_att, on='SCIENTIFIC_NAME')
 
 # Reorder the columns
 cols = ['SCIENTIFIC_NAME','VERNACULAR_NAME',
-        
-        'HABITAT_SIGNIFICANCE_BASELINE_PERCENT_LIKELY',
-        'USER_DEFINED_TARGET_PERCENT_2030_LIKELY',
-        'USER_DEFINED_TARGET_PERCENT_2050_LIKELY',
-        'USER_DEFINED_TARGET_PERCENT_2100_LIKELY',
-         
-        'HABITAT_SIGNIFICANCE_BASELINE_PERCENT_LIKELY_MAYBE',
-        'USER_DEFINED_TARGET_PERCENT_2030_LIKELY_MAYBE',
-        'USER_DEFINED_TARGET_PERCENT_2050_LIKELY_MAYBE',
-        'USER_DEFINED_TARGET_PERCENT_2100_LIKELY_MAYBE',
-        
-        'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY',
-        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY',
-        'HABITAT_SIGNIFICANCE_BASELINE_INSIDE_LUTO_NATURAL_LIKELY',
- 
-        'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY_MAYBE',
-        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY_MAYBE',
-        'HABITAT_SIGNIFICANCE_BASELINE_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
+
+        'ATTAINABLE_LEVEL_LIKELY',
+        'BASEYEAR_LEVEL_LIKELY',
+        'TARGET_LEVEL_2030_LIKELY',
+        'TARGET_LEVEL_2050_LIKELY',
+        'TARGET_LEVEL_2100_LIKELY',
+
+        'ATTAINABLE_LEVEL_LIKELY_MAYBE',
+        'BASEYEAR_LEVEL_LIKELY_MAYBE',
+        'TARGET_LEVEL_2030_LIKELY_MAYBE',
+        'TARGET_LEVEL_2050_LIKELY_MAYBE',
+        'TARGET_LEVEL_2100_LIKELY_MAYBE',
+
+        'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY',
+        'BASEYEAR_LEVEL_OUT_LUTO_NATURAL_LIKELY',
+        'BASEYEAR_LEVEL_INSIDE_LUTO_NATURAL_LIKELY',
+
+        'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY_MAYBE',
+        'BASEYEAR_LEVEL_OUT_LUTO_NATURAL_LIKELY_MAYBE',
+        'BASEYEAR_LEVEL_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
 
         'LISTED_TAXON_ID','MAP_TAXON_ID', 'THREATENED_STATUS',
         'MIGRATORY_STATUS', 'MARINE', 'CETACEAN', 'EXTRACT_DATE', 'TAXON_GROUP',
@@ -1001,11 +1008,13 @@ ECNES_arr = xr.open_dataarray(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES.nc',
 def get_area(arr):
     score_area_weighted_all_Australia = arr * zones['CELL_HA'].values
     score_area_weighted_in_LUTO = arr * idx_in_LUTO * zones['CELL_HA'].values * biodiv_degrade_ly
-    score_area_weighted_out_LUTO = arr * idx_out_LUTO_natural * zones['CELL_HA'].values
+    score_area_weighted_out_LUTO_nat = arr * idx_out_LUTO_natural * zones['CELL_HA'].values
+    score_area_weighted_out_LUTO_non_nat = arr * idx_out_LUTO_non_natural * zones['CELL_HA'].values
     return [{
-        'ALL_HA':score_area_weighted_all_Australia.sum(), 
+        'ALL_HA':score_area_weighted_all_Australia.sum(),
         'IN_LUTO_HA':score_area_weighted_in_LUTO.sum(),
-        'NATURAL_OUT_LUTO_HA':score_area_weighted_out_LUTO.sum()
+        'NATURAL_OUT_LUTO_HA':score_area_weighted_out_LUTO_nat.sum(),
+        'NON_NATURAL_OUT_LUTO_HA':score_area_weighted_out_LUTO_non_nat.sum()
     }]
     
 
@@ -1034,18 +1043,19 @@ ECNES_meta_att = ECNES_meta_att.drop(columns=['PRES_RANK', 'SHAPE_Length', 'SHAP
 
 # Save the inside/outside LUTO data to csv
 ECNES_df = ECNES_in_out_LUTO_area.copy().reset_index()
-ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA'] = ECNES_df['ALL_HA']
-ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_INSIDE_LUTO_NATURAL'] = ECNES_df['IN_LUTO_HA']
-ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL'] = ECNES_df['NATURAL_OUT_LUTO_HA']
-ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] = ECNES_df['IN_LUTO_HA'] + ECNES_df['NATURAL_OUT_LUTO_HA']
-ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_PERCENT'] = ECNES_df['HABITAT_SIGNIFICANCE_BASELINE_SCORE'] / ECNES_df['ALL_HA'] * 100
+ECNES_df['BASELINE_LEVEL_ALL_AUSTRALIA'] = ECNES_df['ALL_HA']
+ECNES_df['BASEYEAR_LEVEL_INSIDE_LUTO_NATURAL'] = ECNES_df['IN_LUTO_HA']
+ECNES_df['BASEYEAR_LEVEL_OUT_LUTO_NATURAL'] = ECNES_df['NATURAL_OUT_LUTO_HA']
+ECNES_df['BASEYEAR_SCORE'] = ECNES_df['IN_LUTO_HA'] + ECNES_df['NATURAL_OUT_LUTO_HA']
+ECNES_df['BASEYEAR_LEVEL'] = ECNES_df['BASEYEAR_SCORE'] / ECNES_df['ALL_HA'] * 100
+ECNES_df['ATTAINABLE_LEVEL'] = (1 - ECNES_df['NON_NATURAL_OUT_LUTO_HA'] / ECNES_df['ALL_HA']) * 100
 
 # Fill the missing COMMUNITY and PRES_RANK with nan
 re_index = pd.MultiIndex.from_product([ECNES_df['COMMUNITY'].unique(), ECNES_df['PRES_RANK'].unique()], names=['COMMUNITY', 'PRES_RANK'])
 ECNES_df = ECNES_df.set_index(['COMMUNITY', 'PRES_RANK']).reindex(re_index).reset_index()
-    
+
 # Drop unneeded columns, and split the data into three dataframes based on the PRES_RANK
-ECNES_df = ECNES_df.drop(columns=['ALL_HA', 'IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA'])
+ECNES_df = ECNES_df.drop(columns=['ALL_HA', 'IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA', 'NON_NATURAL_OUT_LUTO_HA', 'BASEYEAR_SCORE'])
 ECNES_df_LIKELY = ECNES_df.query('PRES_RANK == "LIKELY"').copy().drop(columns=['PRES_RANK'])
 ECNES_df_LIKELY_MAYBE = ECNES_df.query('PRES_RANK == "LIKELY_AND_MAYBE"').copy().drop(columns=['PRES_RANK'])
 
@@ -1054,13 +1064,13 @@ ECNES_df_LIKELY.columns = [f'{col}_LIKELY' if col != 'COMMUNITY' else 'COMMUNITY
 ECNES_df_LIKELY_MAYBE.columns = [f'{col}_LIKELY_MAYBE' if col != 'COMMUNITY' else 'COMMUNITY' for col in ECNES_df_LIKELY_MAYBE.columns]
 
 # Add user defined columns to the LIKELY and MAYBE dataframes
-ECNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2100_LIKELY', np.nan)
-ECNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2050_LIKELY', np.nan)
-ECNES_df_LIKELY.insert(0, 'USER_DEFINED_TARGET_PERCENT_2030_LIKELY', np.nan)
+ECNES_df_LIKELY.insert(0, 'TARGET_LEVEL_2100_LIKELY', np.nan)
+ECNES_df_LIKELY.insert(0, 'TARGET_LEVEL_2050_LIKELY', np.nan)
+ECNES_df_LIKELY.insert(0, 'TARGET_LEVEL_2030_LIKELY', np.nan)
 
-ECNES_df_LIKELY_MAYBE.insert(0, 'USER_DEFINED_TARGET_PERCENT_2100_LIKELY_MAYBE', np.nan)
-ECNES_df_LIKELY_MAYBE.insert(0, 'USER_DEFINED_TARGET_PERCENT_2050_LIKELY_MAYBE', np.nan)
-ECNES_df_LIKELY_MAYBE.insert(0, 'USER_DEFINED_TARGET_PERCENT_2030_LIKELY_MAYBE', np.nan)
+ECNES_df_LIKELY_MAYBE.insert(0, 'TARGET_LEVEL_2100_LIKELY_MAYBE', np.nan)
+ECNES_df_LIKELY_MAYBE.insert(0, 'TARGET_LEVEL_2050_LIKELY_MAYBE', np.nan)
+ECNES_df_LIKELY_MAYBE.insert(0, 'TARGET_LEVEL_2030_LIKELY_MAYBE', np.nan)
 
 # Merge the LIKELY and MAYBE dataframes, and append the shared attributes
 ECNES_df = ECNES_df_LIKELY.merge(ECNES_df_LIKELY_MAYBE, on='COMMUNITY', how='outer')
@@ -1068,25 +1078,27 @@ ECNES_df = ECNES_df.merge(ECNES_meta_att, on='COMMUNITY')
 
 # Reorder the columns
 cols = ['COMMUNITY',
-        
-        'HABITAT_SIGNIFICANCE_BASELINE_PERCENT_LIKELY',
-        'USER_DEFINED_TARGET_PERCENT_2030_LIKELY',
-        'USER_DEFINED_TARGET_PERCENT_2050_LIKELY',
-        'USER_DEFINED_TARGET_PERCENT_2100_LIKELY',
-         
-        'HABITAT_SIGNIFICANCE_BASELINE_PERCENT_LIKELY_MAYBE',
-        'USER_DEFINED_TARGET_PERCENT_2030_LIKELY_MAYBE',
-        'USER_DEFINED_TARGET_PERCENT_2050_LIKELY_MAYBE',
-        'USER_DEFINED_TARGET_PERCENT_2100_LIKELY_MAYBE',
-        
-        'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY',
-        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY',
-        'HABITAT_SIGNIFICANCE_BASELINE_INSIDE_LUTO_NATURAL_LIKELY',
-        
-        'HABITAT_SIGNIFICANCE_BASELINE_ALL_AUSTRALIA_LIKELY_MAYBE',
-        'HABITAT_SIGNIFICANCE_BASELINE_OUT_LUTO_NATURAL_LIKELY_MAYBE',
-        'HABITAT_SIGNIFICANCE_BASELINE_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
-        
+
+        'ATTAINABLE_LEVEL_LIKELY',
+        'BASEYEAR_LEVEL_LIKELY',
+        'TARGET_LEVEL_2030_LIKELY',
+        'TARGET_LEVEL_2050_LIKELY',
+        'TARGET_LEVEL_2100_LIKELY',
+
+        'ATTAINABLE_LEVEL_LIKELY_MAYBE',
+        'BASEYEAR_LEVEL_LIKELY_MAYBE',
+        'TARGET_LEVEL_2030_LIKELY_MAYBE',
+        'TARGET_LEVEL_2050_LIKELY_MAYBE',
+        'TARGET_LEVEL_2100_LIKELY_MAYBE',
+
+        'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY',
+        'BASEYEAR_LEVEL_OUT_LUTO_NATURAL_LIKELY',
+        'BASEYEAR_LEVEL_INSIDE_LUTO_NATURAL_LIKELY',
+
+        'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY_MAYBE',
+        'BASEYEAR_LEVEL_OUT_LUTO_NATURAL_LIKELY_MAYBE',
+        'BASEYEAR_LEVEL_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
+
         'CATEGORY', 'COM_ID','EPBC', 'EXTRACTED', 'CELL_SIZE', 'REGIONS', 'CITATION', 'SPRAT']
 
 ECNES_df = ECNES_df[cols]
