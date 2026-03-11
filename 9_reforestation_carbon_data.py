@@ -5,6 +5,10 @@ import numpy as np
 import rasterio, matplotlib
 
 
+from tqdm.auto import tqdm
+from scipy.ndimage import distance_transform_edt
+
+
 ############################################################################################################################################
 # Initialisation. Create some helper data and functions
 ############################################################################################################################################
@@ -85,6 +89,19 @@ Key logic:
 - Instead of using HDF5, here use xarray to export to NetCDF so we keep the dimension names for ease of use later.
 '''
 
+def fill_nan_nearest_2d(da: xr.DataArray) -> xr.DataArray:
+    """Fill NaN in a 2D (y, x) DataArray with nearest non-NaN neighbor."""
+    data = da.values.copy()
+    mask = np.isnan(data)
+    
+    if not mask.any():
+        return da.copy()
+    
+    _, indices = distance_transform_edt(mask, return_indices=True)
+    data[mask] = data[indices[0][mask], indices[1][mask]]
+    
+    return da.copy(data=data)
+
 
 ########### Environmental plantings (block, riparian, and belt planting arrangements)
 
@@ -100,9 +117,15 @@ max_soil_C = 500
 #   Note, the valid cells only include the "Inside LUTO" study area, which has 4218733 cells
 #   Here keep the cell size as 6956407 to better working with the cell ID system that include all AUS land (i.e., 6956407 cells)
 
-ep_block_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_7_specCat_BeltH.nc')['data']
+ep_block_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_7_specCat_BlockES.nc')['data']
 ep_rip_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_7_specCat_Water.nc')['data']
 ep_belt_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_7_specCat_BeltH.nc')['data']
+
+for yr in tqdm(ep_block_array['YEAR'].values):
+    for var in ['DEBRIS_C_HA', 'SOIL_C_HA', 'TREE_C_HA']:
+        ep_block_array.loc[:, :, yr, var] = fill_nan_nearest_2d(ep_block_array.loc[:, :, yr, var])
+        ep_rip_array.loc[:, :, yr, var] = fill_nan_nearest_2d(ep_rip_array.loc[:, :, yr, var])
+        ep_belt_array.loc[:, :, yr, var] = fill_nan_nearest_2d(ep_belt_array.loc[:, :, yr, var])
 
 ep_block_array = ep_block_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
 ep_rip_array = ep_rip_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
@@ -110,7 +133,7 @@ ep_belt_array = ep_belt_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
 
 
 # Burn in riparian areas
-ep_block_array = (1 - rip_area_prop) * ep_block_array + rip_area_prop * ep_block_array
+ep_block_array = (1 - rip_area_prop) * ep_block_array + rip_area_prop * ep_rip_array
 
 # Cap total carbon per hectare and convert to total CO2e per cell
 ep_block_array[:, 0, :] = np.where(ep_block_array[:, 0, :] > max_tree_C, max_tree_C, ep_block_array[:, 0, :]) * 44 / 12 
@@ -164,6 +187,7 @@ co2e_EP_belt.to_netcdf(
 
 ########### Carbon plantings (block and belt planting arrangements)
 
+
 # Open the 4D xarray datasets (x, y, YEAR, VARIABLE) 
 #   then mask using 2D NLUM_mask (x, y,), 
 #   then convert to numpy arrays of shape (age, C type, cell)
@@ -172,10 +196,32 @@ co2e_EP_belt.to_netcdf(
 #   Here keep the cell size as 6956407 to better working with the cell ID system that include all AUS land (i.e., 6956407 cells)
 
 
-mal_block_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_8_specCat_Block.nc')['data']
+mal_block_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_23_specCat_BlockES.nc')['data']
 mal_belt_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_23_specCat_BeltHW.nc')['data']
 eglob_block_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_8_specCat_Block.nc')['data']
-eglob_belt_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_8_specCat_Belt.nc')['data']
+
+
+'''
+As of [20260226], the fullCAM v2024 is producing unreliable Eglob-Belt carbon stock outputs.
+We then use the EP data to propogate Uglob-Belt carbon stock by applying:
+
+Eglob_Belt = Eglob_Block * (EP_Belt / EP_Block)
+
+'''
+# eglob_belt_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_8_specCat_Belt.nc')['data']
+ep_block_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_7_specCat_BlockES.nc')['data']
+ep_belt_array = xr.load_dataset(inpath + 'carbonstock_RES_1_specId_7_specCat_BeltH.nc')['data']
+eglob_belt_array = eglob_block_array * (ep_belt_array / ep_block_array)
+
+
+
+for yr in tqdm(mal_block_array['YEAR'].values):
+    for var in ['DEBRIS_C_HA', 'SOIL_C_HA', 'TREE_C_HA']:
+        mal_block_array.loc[:, :, yr, var] = fill_nan_nearest_2d(mal_block_array.loc[:, :, yr, var])
+        mal_belt_array.loc[:, :, yr, var] = fill_nan_nearest_2d(mal_belt_array.loc[:, :, yr, var])
+        eglob_block_array.loc[:, :, yr, var] = fill_nan_nearest_2d(eglob_block_array.loc[:, :, yr, var])
+        eglob_belt_array.loc[:, :, yr, var] = fill_nan_nearest_2d(eglob_belt_array.loc[:, :, yr, var])
+
 
 mal_block_array = mal_block_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
 mal_belt_array = mal_belt_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
@@ -183,8 +229,6 @@ eglob_block_array = eglob_block_array.data[np.nonzero(NLUM_mask)].transpose(1, 2
 eglob_belt_array = eglob_belt_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
 
 
-# Burn in riparian areas
-mal_block_array = (1 - rip_area_prop) * mal_block_array + rip_area_prop * mal_block_array
 
 # Smooth out transition from Mallee to E. globulus around 600mm rainfall
 x = (rainfall - 550) / 100
