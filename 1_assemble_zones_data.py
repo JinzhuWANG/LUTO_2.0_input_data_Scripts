@@ -87,8 +87,10 @@ def downcast(dframe):
 ################################ Read NLUM raster, convert to vector GeoDataFrame, join NLUM table, and save to Geopackage
 
 # Collect raster zones as rasterio shape features
-results = ({'properties': {'NLUM_ID': v}, 'geometry': s}
-for i, (s, v) in enumerate(features.shapes(NLUM_ID_raster, mask = None, transform = NLUM_transform)))
+results = (
+    {'properties': {'NLUM_ID': v}, 'geometry': s}
+    for i, (s, v) in enumerate(features.shapes(NLUM_ID_raster, mask = None, transform = NLUM_transform))
+)
 
 # Convert rasterio shape features to GeoDataFrame
 gdfp = gpd.GeoDataFrame.from_features(list(results), crs = NLUM_crs)
