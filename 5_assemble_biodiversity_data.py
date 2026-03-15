@@ -9,6 +9,7 @@ import rioxarray as rxr
 import numpy as np
 import pandas as pd
 import geopandas as gpd
+import shapely
 
 from glob import glob
 from itertools import product
@@ -529,8 +530,10 @@ ref_meta = {
     'count': 1,
     'crs': NLUM.rio.crs,
     'transform': NLUM.rio.transform(),
-    'compress': 'lzw',  
+    'compress': 'lzw',
 }
+ref_meta_float = {**ref_meta, 'dtype': 'float32', 'nodata': np.nan}
+ref_transform = ref_meta['transform']
 
 
 
@@ -555,25 +558,24 @@ else:
     
     
 # Filter the data to include only the species that are significant for the LUTO study area
-snes_filter = '''
-    MARINE.isna() 
-    and ( 
-        THREATENED_STATUS.isin(["Critically Endangered", "Vulnerable", "Endangered", "Extinct in the wild"])
-        or MIGRATORY_STATUS == "Migratory"
-    )
-'''.replace('\n', ' ')
+snes_filter = (
+    "MARINE.isna() "
+    "and ("
+        "THREATENED_STATUS.isin(['Critically Endangered', 'Vulnerable', 'Endangered', 'Extinct in the wild']) "
+        "or MIGRATORY_STATUS == 'Migratory' " 
+    ")"
+)
 
-ecnes_filter = '''
-    EPBC.isin(["Critically Endangered",  "Endangered"])
-'''.replace('\n', ' ')
+ecnes_filter = (
+    "EPBC.isin(['Critically Endangered',  'Endangered']) "
+    "and COMMUNITY != 'Giant Kelp Marine Forests of South East Australia'"  # This is a marine community.
+)
 
 snes_dissolve = snes_dissolve.query(snes_filter)
 ecnes_dissolve = ecnes_dissolve.query(ecnes_filter)
 
 
-
-
-
+# Function to get the presence value and save path for each row of the dissolved data
 def get_presense_and_save_path(row):
     # Get value for rasterisation polygon (1 for 'maybe present', 2 for 'likely present')
     if 'PRES_RANK' in row:  # ECNES data
@@ -591,22 +593,45 @@ def get_presense_and_save_path(row):
 
 
 
-# Function to rasterise the data
+# Build a fine-resolution grid (10x NLUM) for rasterise-then-average approach
+_fine_scale = 10   # ECNES is in 100m resolution, so it is 10x more fine than the NLUM grid (1km resolution)
+_fine_transform = Affine(
+    ref_transform.a / _fine_scale, 0, ref_transform.c,
+    0, ref_transform.e / _fine_scale, ref_transform.f
+)
+_fine_shape = (ref_mask.shape[0] * _fine_scale, ref_mask.shape[1] * _fine_scale)
+
+
+# Function to rasterise polygon at fine resolution, then average-resample to NLUM grid
 def rasterize(row):
     val, save_path = get_presense_and_save_path(row)
-    # Rasterise the polygon
-    arr = rasterio.features.rasterize(
-        [(row["geometry"], val)],
-        out_shape=ref_mask.shape,
-        transform=ref_meta['transform'],
+
+    # Rasterise at fine resolution (binary: 1 where polygon covers, 0 elsewhere)
+    fine_arr = rasterio.features.rasterize(
+        [(row["geometry"], 1)],
+        out_shape=_fine_shape,
+        transform=_fine_transform,
         all_touched=False,
         dtype='uint8',
     )
-    # Apply mask, 255 will be used for nodata
-    arr = np.where(ref_mask, arr, 255)
-    # Save to GEOTIFF
-    with rasterio.open(save_path, 'w', **ref_meta) as dst:
-        dst.write(arr, 1)
+
+    # Average-resample from fine grid to NLUM grid to get area proportion [0.0–1.0]
+    dst_arr = np.zeros(ref_mask.shape, dtype=np.float32)
+    reproject(
+        fine_arr,
+        dst_arr,
+        src_transform=_fine_transform,
+        src_crs=ref_meta['crs'],
+        dst_transform=ref_transform,
+        dst_crs=ref_meta['crs'],
+        resampling=rasterio.enums.Resampling.average,
+    )
+
+    # Apply mask (NaN outside NLUM); values are raw proportion [0.0–1.0]
+    dst_arr = np.where(ref_mask, dst_arr, np.nan).astype(np.float32)
+
+    with rasterio.open(save_path, 'w', **ref_meta_float) as dst:
+        dst.write(dst_arr, 1)
         
 
 
@@ -626,7 +651,7 @@ if not os.path.exists(f'{SNES_ECNES_dir}/Processed/ECNES'):
 
 # Rasterise and save the SNES data to GEOTIFF
 tasks = [delayed(rasterize)(row) for _,row in snes_dissolve.iterrows()]
-for _ in tqdm(Parallel(n_jobs=n_workers, return_as='generator')(tasks), total=len(tasks)):
+for _ in tqdm(Parallel(n_jobs=-1, return_as='generator')(tasks), total=len(tasks)):
     pass
 
 # Save SNES attributes to csv
@@ -639,9 +664,8 @@ snes_meta.to_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv', index=False
 # Rasterise and save the ECNES data to GEOTIFF
 tasks = [delayed(rasterize)(row) for _,row in ecnes_dissolve.iterrows()]
 
-raster_arr = []
 for out in tqdm(Parallel(n_jobs=n_workers, return_as='generator')(tasks), total=len(tasks)):
-    raster_arr.append(out)
+    pass
 
 # Save ECNES attributes to csv
 ecnes_meta = ecnes_dissolve.copy().drop(columns='geometry')
@@ -664,59 +688,29 @@ Merge the 'LIKELY' and 'MAYBE' layers to create a "LIKELY_MAYBE" layer, and save
  
 '''
 
-# Define the cell values for 'LIKELY' and 'MAYBE'
-bio_raw2val = {2: 0.8, 1: 0.3}  # 2 is 'LIKELY', 1 is 'MAYBE'
+# Define the cell weights for 'LIKELY' and 'MAYBE' presence ranks
+bio_presence_weight = {'LIKELY': 0.8, 'MAYBE': 0.3}
 ref_meta.update({'dtype': 'float32', 'nodata': np.nan})
 snes_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv')
 
 
-def fill_edge_overlap(arr, val_to_fill=3, known_vals=[1,2], cutoff=1.5):
+def merge_species(in_df):
     """
-    Some edge cells will be rasterised both as 1 ('MAYBE') and 2 ('LIKELY'),
-    so we need to fill the these cells with a specific value to avoid overlap.
-    
-    Logic:
-    - If a cell is has a value of 3, then it is an overlapping cell.
-    - We use linear interpolation to calculate value for this cel.
-    - If the interpolated value <  cutoff, we set it to 1 (MAYBE).
-    - If the interpolated value >= cutoff, we set it to 2 (LIKELY).
+    Merge LIKELY and MAYBE layers for a species using cell-fraction proportions.
+
+    Each TIF stores the raw area proportion [0.0–1.0] for that presence rank.
+    We weight each layer (LIKELY=0.8, MAYBE=0.3), then take the element-wise
+    maximum across layers so that LIKELY takes precedence where both overlap.
     """
-    unknow_mask = (arr == val_to_fill)
-    arr[unknow_mask] = cutoff               # Set the overlapping cells to cutoff to avoid bias focal mean calculation
-    arr = np.where(arr == 0, cutoff, arr)   # Set zero values to cutoff to avoid bias focal mean calculation
-    
-    # Get the average of the surrounding cells
-    kernel = np.ones((3, 3)) / 9
-    focal_mean = convolve2d(arr, kernel, mode='same', boundary='fill', fillvalue=0)
-    
-    # Fill the overlapping cells with the average value
-    fill_val = focal_mean[unknow_mask]
-    fill_val = np.where(fill_val < cutoff, 1, fill_val)  
-    fill_val = np.where(fill_val >= cutoff, 2, fill_val) 
-    
-    arr[unknow_mask] = fill_val
-    arr = np.where(arr == cutoff, 0, arr)  # Set the cutoff values to NaN
-
-    return arr
-
-
-def merge_species(in_df, overlap_val=3):
     arr_merge = []
-    for _,row in in_df.iterrows():
-        arr = rasterio.open(row['TIF_PATH']).read(1).astype('float32')
-        arr_merge.append(arr)
-        
-    arr = np.stack(arr_merge).sum(axis=0)
-    arr = np.where(arr > overlap_val, 0, arr)  # Remove any values greater than 3 (background cells) to avoid confuse the interpolator
-    
-    if arr.sum() == 0 or (arr == overlap_val).sum() == 0: 
-        pass # pass if no valid data or no overlap
-    else:
-        arr = fill_edge_overlap(arr, overlap_val)
-    
-    for k,v in bio_raw2val.items():
-        arr = np.where(arr == k, v, arr)
+    for _, row in in_df.iterrows():
+        prop = rasterio.open(row['TIF_PATH']).read(1).astype('float32')
+        rank = row.get('PRESENCE_RANK', row.get('PRES_RANK'))
+        weight = bio_presence_weight[presence_dict[rank]]
+        arr_merge.append(prop * weight)
 
+    # Take element-wise max so LIKELY (0.8) takes precedence over MAYBE (0.3) in overlap cells
+    arr = np.stack(arr_merge).max(axis=0)
     return arr
 
 
@@ -806,13 +800,17 @@ ecnes_meta_merged.to_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta_merged.c
 # Read DCCEEW SNES GeoTIFF file paths
 SNES_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv')
 
-# Create an empty array to store the data
+# Create an empty array to store the data (float32 for cell-fraction proportions)
 SNES_arr = xr.DataArray(
-    np.zeros((SNES_meta['SCIENTIFIC_NAME'].nunique(), SNES_meta['PRESENCE_RANK'].nunique(), NLUM.sum().item()), dtype=np.int8),
+    np.zeros((
+        SNES_meta['SCIENTIFIC_NAME'].nunique(), 
+        SNES_meta['PRESENCE_RANK'].nunique(), 
+        NLUM.sum().item()),  dtype=np.float32
+    ),
     dims=['species', 'presence', 'cell'],
     coords={
-        'species':SNES_meta['SCIENTIFIC_NAME'].unique(), 
-        'presence':SNES_meta['PRESENCE_RANK'].unique(), 
+        'species':SNES_meta['SCIENTIFIC_NAME'].unique(),
+        'presence': [presence_dict[r] for r in SNES_meta['PRESENCE_RANK'].unique()],
         'cell':np.arange(NLUM.sum().item())}
 )
 
@@ -820,31 +818,38 @@ SNES_arr = xr.DataArray(
 # Parallel processing to put the data into the empty array
 def get_arr(row):
     ds = rxr.open_rasterio(row['TIF_PATH']).sel(band=1).drop_vars('band')
-    ds = xr.where(ds, 1, 0).astype(np.bool_)                    
-    ds = ds.values[np.nonzero(NLUM.values)]
-    return row['SCIENTIFIC_NAME'], row['PRESENCE_RANK'], ds
+    ds = ds.values[np.nonzero(NLUM.values)].astype(np.float32)
+    return row['SCIENTIFIC_NAME'], presence_dict[row['PRESENCE_RANK']], ds
 
 
 tasks = (delayed(get_arr)(row) for _,row in SNES_meta.iterrows())
 for species,rank,arr in tqdm(Parallel(n_jobs=20, return_as='generator')(tasks), total=len(SNES_meta)):
     SNES_arr.loc[species, rank] = arr
-    
-# Sum the 'LIKELY' and 'MAYBE' layers to get the full species distribution
-SNES_arr_LIKELY_MAYBE_sum = SNES_arr.sum('presence').astype(np.bool_)           # 0 is 'No Presence', 1 is 'likely and maybe'
-SNES_arr.loc[dict(presence=1)] = SNES_arr_LIKELY_MAYBE_sum.values
-SNES_arr.coords['presence'] = ['LIKELY', 'LIKELY_AND_MAYBE']
+
+# Combine LIKELY and MAYBE into a single weighted layer:
+# Apply presence weights (LIKELY=0.8, MAYBE=0.3) to raw proportions.
+# Use LIKELY where present, fall back to MAYBE elsewhere.
+SNES_weighted_likely = SNES_arr.sel(presence='LIKELY') * bio_presence_weight['LIKELY']   # proportion * 0.8
+SNES_weighted_maybe  = SNES_arr.sel(presence='MAYBE') * bio_presence_weight['MAYBE']    # proportion * 0.3
+SNES_likely_and_maybe = np.maximum(SNES_weighted_likely, SNES_weighted_maybe)
+
+SNES_arr = xr.DataArray(
+    np.stack([SNES_weighted_likely.values, SNES_likely_and_maybe.values]),
+    dims=['presence', 'species', 'cell'],
+    coords={'presence': ['LIKELY', 'LIKELY_AND_MAYBE'], 'species': SNES_arr.species, 'cell': SNES_arr.cell}
+).transpose('species', 'presence', 'cell')
 
 
 # Save to nc, chunked by species
 SNES_arr.name = 'data'
 SNES_arr.to_netcdf(
-    f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES.nc', 
-    mode='w', 
+    f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES.nc',
+    mode='w',
     encoding={'data': {
-        "compression": "gzip", 
-        "compression_opts": 9,  
-        "dtype": 'bool',
-        "chunksizes": (1, 1, SNES_arr.sizes['cell'])}}, 
+        "compression": "gzip",
+        "compression_opts": 9,
+        "dtype": 'float32',
+        "chunksizes": (1, 1, SNES_arr.sizes['cell'])}},
     engine='h5netcdf'
 )
 
@@ -962,39 +967,47 @@ SNES_df.to_csv(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES_target.csv', index=F
 # Read DCCEEW ECNES GeoTIFF file paths
 ECNES_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta.csv')
 
-# Create an empty array to store the data
+# Create an empty array to store the data (float32 for cell-fraction proportions)
 ECNES_arr = xr.DataArray(
-    np.zeros((ECNES_meta['COMMUNITY'].nunique(), ECNES_meta['PRES_RANK'].nunique(), NLUM.sum().item()), dtype=np.bool_),
+    np.zeros((ECNES_meta['COMMUNITY'].nunique(), ECNES_meta['PRES_RANK'].nunique(), NLUM.sum().item()), dtype=np.float32),
     dims=['species', 'presence', 'cell'],
-    coords={'species':ECNES_meta['COMMUNITY'].unique(), 'presence':ECNES_meta['PRES_RANK'].unique(), 'cell':np.arange(NLUM.sum().item())}
+    coords={'species':ECNES_meta['COMMUNITY'].unique(), 'presence':[presence_dict[r] for r in ECNES_meta['PRES_RANK'].unique()], 'cell':np.arange(NLUM.sum().item())}
 )
 
 def get_arr(row):
-    arr = rasterio.open(row['TIF_PATH']).read(1).astype('bool')
+    arr = rasterio.open(row['TIF_PATH']).read(1).astype('float32')
     arr = arr[np.nonzero(NLUM.values)]
-    return row['COMMUNITY'], row['PRES_RANK'], arr
+    return row['COMMUNITY'], presence_dict[row['PRES_RANK']], arr
 
 tasks = (delayed(get_arr)(row) for _,row in ECNES_meta.iterrows())
 for species,rank,arr in tqdm(Parallel(n_jobs=20, return_as='generator')(tasks), total=len(ECNES_meta)):
     ECNES_arr.loc[species,rank] = arr
-    
-# Sum the 'LIKELY' and 'MAYBE' layers to get the full species distribution
-ECNES_arr_LIKELY_MAYBE_sum = ECNES_arr.sum('presence').astype(np.int8)        # 0 is 'NOT PRESENT', 1 is 'MAYBE AND LIKELY'
-ECNES_arr.loc[dict(presence=1)] = ECNES_arr_LIKELY_MAYBE_sum
-ECNES_arr.coords['presence'] = ['LIKELY', 'LIKELY_AND_MAYBE']
+
+# Combine LIKELY and MAYBE into a single weighted layer:
+# Apply presence weights (LIKELY=0.8, MAYBE=0.3) to raw proportions.
+# Use LIKELY where present, fall back to MAYBE elsewhere.
+ECNES_weighted_likely = ECNES_arr.sel(presence='LIKELY') * bio_presence_weight['LIKELY']   # proportion * 0.8
+ECNES_weighted_maybe  = ECNES_arr.sel(presence='MAYBE') * bio_presence_weight['MAYBE']    # proportion * 0.3
+ECNES_likely_and_maybe = np.maximum(ECNES_weighted_likely, ECNES_weighted_maybe)
+
+ECNES_arr = xr.DataArray(
+    np.stack([ECNES_weighted_likely.values, ECNES_likely_and_maybe.values]),
+    dims=['presence', 'species', 'cell'],
+    coords={'presence': ['LIKELY', 'LIKELY_AND_MAYBE'], 'species': ECNES_arr.species, 'cell': ECNES_arr.cell}
+).transpose('species', 'presence', 'cell')
 
 
 
 # Save to nc, chunked by species
 ECNES_arr.name = 'data'
 ECNES_arr.to_netcdf(
-    f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES.nc', 
-    mode='w', 
+    f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES.nc',
+    mode='w',
     encoding={'data': {
-        "compression": "gzip", 
-        "compression_opts": 9,  
-        "dtype": 'bool',
-        "chunksizes": (1, 1, ECNES_arr.sizes['cell'])}}, 
+        "compression": "gzip",
+        "compression_opts": 9,
+        "dtype": 'float32',
+        "chunksizes": (1, 1, ECNES_arr.sizes['cell'])}},
     engine='h5netcdf'
 )
 
@@ -1302,7 +1315,7 @@ zonation_arr.to_netcdf(
 
 # ----------------- Calculate the rank2area performance curves for conservation priority data -----------------
 
-GBF2_conserve_performance = pd.DataFrame()
+Biodiversity_conserve_performance = pd.DataFrame()
 
 # Get conservation priority raster/csv
 for ssp in ['ssp126', 'ssp245', 'ssp370', 'ssp585']:
@@ -1345,7 +1358,7 @@ for ssp in ['ssp126', 'ssp245', 'ssp370', 'ssp585']:
     ly_stats['AREA_COVERAGE_PERCENT'] = np.arange(101)
     
     # Save the conservation priority data to the array
-    GBF2_conserve_performance = pd.concat([GBF2_conserve_performance, ly_stats])
+    Biodiversity_conserve_performance = pd.concat([Biodiversity_conserve_performance, ly_stats])
     
     
 # Get conservation priority raster/csv
@@ -1382,12 +1395,12 @@ for nes in ['ECNES_likely_may', 'ECNES_likely', 'SNES_likely_may', 'SNES_likely'
     ly_stats = ly_stats.iloc[
         abs(np.arange(101).reshape(-1, 1) - ly_stats['AREA_COVERAGE_PERCENT'].values).argmin(axis=1)].copy()
     ly_stats['AREA_COVERAGE_PERCENT'] = np.arange(101)
-    GBF2_conserve_performance = pd.concat([GBF2_conserve_performance, ly_stats])
+    Biodiversity_conserve_performance = pd.concat([Biodiversity_conserve_performance, ly_stats])
 
 
 # Save csv to Excel
-with pd.ExcelWriter(f'{SNES_ECNES_dir}/Processed/GBF2_conserve_performance.xlsx') as writer:
-    for source, df in GBF2_conserve_performance.groupby('source'):
+with pd.ExcelWriter(f'{SNES_ECNES_dir}/Processed/Biodiversity_conserve_performance.xlsx') as writer:
+    for source, df in Biodiversity_conserve_performance.groupby('source'):
         df = df[['AREA_COVERAGE_PERCENT', 'PRIORITY_RANK', 'PRIORITY_RANK_CUMSUM_CONTRIBUTION']]
         df.to_excel(writer, sheet_name=source, index=False)
 
