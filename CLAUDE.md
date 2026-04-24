@@ -1,73 +1,67 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
 
 ## Repository Overview
 
-This repository contains a sequential data processing pipeline for assembling LUTO 2.0 (Land Use Trade-Offs) input data. The scripts process geospatial, agricultural, biodiversity, and biophysical data to create standardized datasets for land use modeling in Australia.
+Sequential data processing pipeline that assembles all input data for LUTO 2.0 (Land Use Trade-Offs model). Scripts process geospatial, agricultural, biodiversity, and biophysical data for land use modelling across Australia at 1 km resolution (~7 million cells).
 
-## Data Processing Pipeline Architecture
+Individual script documentation is in the `CLAUDE/` directory — read the relevant file before modifying any script.
 
-The scripts follow a numbered sequence that must be executed in order:
+## Pipeline Execution Order
 
-1. **1_assemble_zones_data.py** - Creates base spatial zones from NLUM (National Land Use Map) raster data, converts to vector format, and establishes the foundational cell-based spatial framework
-2. **2_assemble_agricultural_data.py** - Processes agricultural profit mapping data from CSIRO, livestock data, and creates agricultural commodity datasets
-3. **3_agriculture_climate_damage.py** - Calculates climate damage impacts on agricultural productivity
-4. **4_assemble_biophysical_data.py** - Processes biophysical environmental data including soils, climate, and terrain variables
-5. **5_assemble_biodiversity_data.py** - Assembles biodiversity and conservation data including species suitability and environmental condition indices
-6. **6_water_yield_modelling.py** - Calculates water yield using InVEST model under various climate scenarios
-7. **7_assemble_additional_land_use_sieve_data.py** - Creates land use suitability constraints and sieve layers
-8. **8_assemble_ag_yield_gap_data.py** - Processes agricultural yield gap analysis data
-9. **9_reforestation_carbon_data.py** - Assembles carbon sequestration data for reforestation scenarios
+Scripts must be run in order. Later scripts depend on outputs from earlier ones.
 
-## Common Data Patterns
+| Script | Topic | Key output |
+|---|---|---|
+| `1_assemble_zones_data.py` | Spatial framework | `cell_zones_df.h5` |
+| `2_assemble_agricultural_data.py` | Agricultural economics | `cell_LU_mapping.h5`, SA2 ag data HDF5s |
+| `3_agriculture_climate_damage.py` | Climate yield damage | `SA2_climate_damage_mult.h5` |
+| `4_assemble_biophysical_data.py` | Biophysical variables | `cell_biophysical_df.h5` |
+| `5_1_assemble_biodiversity_data.py` | Biodiversity scores (national) | NVIS `.nc`, SNES/ECNES `.nc` + target CSVs |
+| `5_2_get_NVIS_SNES_ECNES_targets_by_regions.py` | Biodiversity scores (regional) | NRM/IBRA target Excel/CSV files |
+| `6_water_yield_modelling.py` | Water yield | Appended into `cell_biophysical_df.h5` |
+| `7_assemble_additional_land_use_sieve_data.py` | Land use constraints | `cell_lu_sieve_df.pkl` |
+| `8_assemble_ag_yield_gap_data.py` | Yield gap | `SA2_yield_gap_mult.h5` |
+| `9_reforestation_carbon_data.py` | Carbon sequestration | `tCO2_ha_*.nc` NetCDF files |
 
-### Spatial Framework
-All scripts use a consistent spatial framework based on:
-- **NLUM mask raster**: `N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif`
-- **Cell dataframe**: `N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5`
-- Standard helper functions for 1D/2D array conversion and spatial operations
+## Spatial Framework
 
-### Common Helper Functions
-Most scripts implement similar utility functions:
-- `conv_1D_to_2D()` - Converts 1D data arrays to 2D spatial arrays
-- `map_in_2D()` - Visualizes data as spatial maps
-- `downcast()` - Optimizes dataframe memory usage by downcasting data types
+All scripts share a consistent spatial framework:
 
-### Data Sources
-Key external data dependencies include:
-- NLUM (National Land Use Map) spatial data
-- CSIRO Profit Map agricultural data
-- Biodiversity and environmental suitability data
-- Climate and biophysical raster datasets
-- Various government statistical and spatial datasets
+- **NLUM mask**: `N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif`  
+  The 1 km raster mask of Australia. Non-zero pixels define the study area (~7 M cells).
+- **Cell dataframe**: produced by script 1, used by all others.  
+  Path: `N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5`
+- **1D ↔ 2D convention**: `NLUM.values` gives a 2D boolean mask; `np.nonzero(NLUM.values)` gives the 1D cell index. All cell-level arrays are 1D with length = number of NLUM cells.
 
-## Development Commands
+## Common Helper Patterns
 
-**Running Scripts:**
-```bash
-python <script_name>.py
-```
+Most scripts define:
+- `conv_1D_to_2D(arr)` — places a 1D cell array back into the 2D NLUM grid for plotting
+- `map_in_2D(arr, title)` — quick matplotlib visualisation of spatial data
+- `downcast(df)` — reduces int64/float64 columns to smallest fitting dtype (memory optimisation)
 
-**Data Validation:**
-Scripts typically output processed data to:
-- `N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/`
-- `Intermediate_data_outputs/`
+## Output Directories
 
-## Architecture Notes
+- `N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/` — static cell-level snapshots (HDF5, pickle)
+- `N:/Data-Master/LUTO_2.0_input_data/Input_data/3D_Spatial_Timeseries/` — time × cell NetCDF arrays (carbon)
+- `Intermediate_data_outputs/` — scratch outputs used for validation and debugging
 
-### Memory Management
-- Scripts use pandas HDF5 format for efficient large dataset storage
-- Rasterio for geospatial raster processing with memory-mapped access
-- Downcast functions to optimize memory usage of dataframes
+## Critical Design Notes
 
-### Spatial Data Processing
-- All spatial operations maintain consistent CRS and spatial extent
-- Uses rasterio for raster operations and geopandas for vector processing
-- xarray integration for multi-dimensional climate/biodiversity datasets
+### Biodiversity weighting (scripts 5_1 and 5_2)
+Two distinct weights are used in the biodiversity pipeline — they must not be confused:
 
-### Data Pipeline Dependencies
-Scripts have strict sequential dependencies - later scripts require outputs from earlier ones. The `cell_zones_df.h5` file created by script 1 is fundamental to all subsequent processing.
+- **`biodiv_degrade_ly`** — the land-condition degradation weight. Represents the fraction of pre-1750 biodiversity remaining in each cell given current land use (HCAS PERCENTILE_50, normalised to unallocated natural = 1). Used for **area-weighted score computation**.
+- **`bio_presence_weight = {'LIKELY': 0.8, 'MAYBE': 0.3}`** — presence uncertainty weights. Used **only for zonation** to combine LIKELY and MAYBE presence layers. Never applied when computing area scores.
 
-### Error Handling
-Scripts typically include manual data validation and quality checking rather than automated error handling. Visual plotting functions help verify spatial data integrity.
+See `CLAUDE/5_1_assemble_biodiversity_data.md` and `CLAUDE/5_2_get_NVIS_SNES_ECNES_targets_by_regions.md` for full details.
+
+### Memory management
+- Pandas HDF5 (`.h5`) for large tabular data with fast keyed access
+- xarray NetCDF for multi-dimensional arrays (species × cell, age × cell)
+- `downcast()` used throughout to halve memory footprint
+
+### Pipeline dependencies
+`cell_zones_df.h5` is foundational — all other scripts read it for cell coordinates, area (`CELL_HA`), and administrative boundaries. Script 5_2 also depends on all outputs from script 5_1.
