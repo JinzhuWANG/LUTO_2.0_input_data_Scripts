@@ -9,18 +9,15 @@ import rioxarray as rxr
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-import shapely
 
 from glob import glob
 from itertools import product
 from tqdm.auto import tqdm
 from joblib import Parallel, delayed
-from scipy.signal import convolve2d
 from rasterio import features
 from rasterio.warp import reproject
 from pyproj import CRS
 from affine import Affine
-
 
 
 
@@ -41,18 +38,15 @@ SNES_ECNES_dir = 'N:/Data-Master/Biodiversity/DCCEEW/SNES_ECNES'
 NVIS_PRE_1750_path = 'N:/Data-Master/NVIS/NVIS_V7_0_AUST_RASTERS_PRE_ALL'
 NVIS_SAVE_path = 'N:/Data-Master/NVIS/Processed'
 HCAS_condition = 'N:/Data-Master/Habitat_condition_assessment_system/Data/Processed/HABITAT_CONDITION.csv'
-IBRA_save_path = 'N:/Data-Master/Australian_administrative_boundaries/ibra7_2019_aus/processed'
-
-
 # Constants
 Unalloc_nat_code = 23
-ibra_cols = ['IBRA_ID', 'IBRA_SUB_CODE_7', 'IBRA_SUB_NAME_7', 'IBRA_REG_CODE_7', 'IBRA_REG_NAME_7']
+bio_presence_weight = {'LIKELY': 0.8, 'MAYBE': 0.3}
 
 # Upstream data
 zones = pd.read_hdf(
-    'N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5', 
-    key='cell_zones_df', 
-    columns=['X', 'Y', 'CELL_HA'] + ibra_cols
+    'N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5',
+    key='cell_zones_df',
+    columns=['X', 'Y', 'CELL_HA']
 )
 bioph = pd.read_hdf(
     'N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_biophysical_df.h5', 
@@ -260,7 +254,7 @@ for ssp, mode in product(ensemble_df['ssp'].unique(), ensemble_df['mode'].unique
         mode='w', 
         encoding={'data': {
             "compression": "gzip", 
-            "compression_opts": 9,  
+            "compression_opts": 5,  
             "dtype": 'uint8',
             "chunksizes": (1, 1, ensemble_arr.sizes['y'], ensemble_arr.sizes['x'])}}, 
         engine='h5netcdf'
@@ -500,10 +494,9 @@ bio_scores.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF8_SCORES_GROUP.csv', 
 '''
 Save SNES/ECNES to TIFFS.
 
- - 0: Not present
- - 1: May present
- - 2: Likely present
- - 255: No data
+ - 0.0: No presence
+ - 0.0–1.0: Area proportion of species/community presence within the cell
+ - NaN: No data (outside NLUM mask)
 
 A csv file containing the metadata of the dissolved vector data and paths to the 
 rasterised data is also saved to '{SNES_ECNES_dir}/Processed'.
@@ -538,6 +531,8 @@ ref_transform = ref_meta['transform']
 
 
 
+# ------------------- Rasterise SNES/ECNES data to GEOTIFF ------------------------------------------
+
 # Read the SNES biodiversity data; dissolve the data by 'SCIENTIFIC_NAME'
 if not os.path.exists(f"{SNES_ECNES_dir}/Processed/snes_dissolve.gpkg"):
     snes = gpd.read_file(f"{SNES_ECNES_dir}/SNES_version_6 March 2025/snes_public_gdb.gdb", driver="OpenFileGDB", layer="SNES_Public")
@@ -559,10 +554,10 @@ else:
     
 # Filter the data to include only the species that are significant for the LUTO study area
 snes_filter = (
-    "MARINE.isna() "
+    "(MARINE.isna() or MARINE == 'Listed - overfly marine area') "
     "and ("
         "THREATENED_STATUS.isin(['Critically Endangered', 'Vulnerable', 'Endangered', 'Extinct in the wild']) "
-        "or MIGRATORY_STATUS == 'Migratory' " 
+        "or MIGRATORY_STATUS == 'Migratory' "
     ")"
 )
 
@@ -676,126 +671,7 @@ ecnes_meta.to_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta.csv', index=Fal
 
 
 
-
-# ------------------- Merge 'LIKELY' and 'MAYBE' layer ------------------------------------------
-'''
-Merge the 'LIKELY' and 'MAYBE' layers to create a "LIKELY_MAYBE" layer, and save to TIFFs.
-
- - 0: Not present
- - 0.3 Maybe present
- - 0.8 Likely present
- - np.nan: No data
- 
-'''
-
-# Define the cell weights for 'LIKELY' and 'MAYBE' presence ranks
-bio_presence_weight = {'LIKELY': 0.8, 'MAYBE': 0.3}
-ref_meta.update({'dtype': 'float32', 'nodata': np.nan})
-snes_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv')
-
-
-def merge_species(in_df):
-    """
-    Merge LIKELY and MAYBE layers for a species using cell-fraction proportions.
-
-    Each TIF stores the raw area proportion [0.0–1.0] for that presence rank.
-    We weight each layer (LIKELY=0.8, MAYBE=0.3), then take the element-wise
-    maximum across layers so that LIKELY takes precedence where both overlap.
-    """
-    arr_merge = []
-    for _, row in in_df.iterrows():
-        prop = rasterio.open(row['TIF_PATH']).read(1).astype('float32')
-        rank = row.get('PRESENCE_RANK', row.get('PRES_RANK'))
-        weight = bio_presence_weight[presence_dict[rank]]
-        arr_merge.append(prop * weight)
-
-    # Take element-wise max so LIKELY (0.8) takes precedence over MAYBE (0.3) in overlap cells
-    arr = np.stack(arr_merge).max(axis=0)
-    return arr
-
-
-
-
-
-# Merge SNES data
-tasks = []
-save_paths = pd.DataFrame()
-for _,df in snes_meta.groupby(['SCIENTIFIC_NAME']):
-    # Get name and new save-path
-    first_row = df.iloc[0]
-    name = re.sub(r'[^a-zA-Z0-9]', '_', first_row['SCIENTIFIC_NAME'])
-    # Create a new folder to store the merged data
-    save_dir = f'{SNES_ECNES_dir}/Processed/LIKELY_MAYBE_MERGED/SNES/{first_row["TAXON_GROUP"]}'
-    save_path = f'{save_dir}/{name}.tif'
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir, exist_ok=True)
-        
-    def merge_save(in_df, to_path):
-        arr = merge_species(in_df)
-        with rasterio.open(to_path, 'w', **ref_meta) as dst:
-            dst.write(arr, 1)
-  
-    # Save the merged data
-    tasks.append(delayed(merge_save)(df, save_path))
-    save_paths = pd.concat([save_paths, pd.DataFrame([{'LISTED_TAXON_ID':first_row['LISTED_TAXON_ID'], 'TIF_PATH':save_path}])])
-
-# Parallel processing to merge and save the SNES data   
-for _ in tqdm(Parallel(n_jobs=n_workers, return_as='generator')(tasks), total=len(tasks)):
-    pass
-    
-
-# Save the metadata to csv
-snes_meta_merged = snes_meta.copy()
-snes_meta_merged = snes_meta_merged.groupby(['SCIENTIFIC_NAME']).aggregate('first').reset_index()
-snes_meta_merged = snes_meta_merged.drop(columns=['PRESENCE_CATEGORY', 'PRESENCE_RANK','SHAPE_Length', 'SHAPE_Area', 'TIF_PATH'])
-snes_meta_merged = snes_meta_merged.merge(save_paths, on='LISTED_TAXON_ID')
-snes_meta_merged.to_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta_merged.csv', index=False)
-
-
-
-
-
-# Merge ECNES data
-ecnes_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta.csv')
-
-tasks = []
-save_paths = pd.DataFrame()
-for _,df in ecnes_meta.groupby(['COMMUNITY']):
-    # Get name and new save-path
-    first_row = df.iloc[0]
-    name = re.sub(r'[^a-zA-Z0-9]', '_', first_row['COMMUNITY'])
-    # Create a new folder to store the merged data
-    save_dir = f'{SNES_ECNES_dir}/Processed/LIKELY_MAYBE_MERGED/ECNES'
-    save_path = f'{save_dir}/{name}.tif'
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir, exist_ok=True)
-        
-    def merge_save(in_df, to_path):
-        arr = merge_species(in_df)
-        with rasterio.open(to_path, 'w', **ref_meta) as dst:
-            dst.write(arr, 1)
-            
-    # Save the merged data
-    tasks.append(delayed(merge_save)(df, save_path))
-    save_paths = pd.concat([save_paths, pd.DataFrame([{'COM_ID':first_row['COM_ID'], 'TIF_PATH':save_path}])])
-
-
-# Parallel processing to merge and save the ECNES data
-for _ in tqdm(Parallel(n_jobs=n_workers, return_as='generator')(tasks), total=len(tasks)):
-    pass
-
-
-# Save the metadata to csv
-ecnes_meta_merged = ecnes_meta.copy()
-ecnes_meta_merged = ecnes_meta_merged.groupby(['COMMUNITY']).aggregate('first').reset_index()
-ecnes_meta_merged = ecnes_meta_merged.drop(columns=['PRES_RANK', 'CATEGORY', 'SHAPE_Length', 'SHAPE_Area', 'TIF_PATH'])
-ecnes_meta_merged = ecnes_meta_merged.merge(save_paths, on='COM_ID')
-ecnes_meta_merged.to_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta_merged.csv', index=False)
-
-
-
-
-# ------------------- Masking merged GEOTIFFs and save to NetCDF ------------------------------------------
+# ------------------- Assemble SNES data into a single array ------------------------------------------
 
 # Read DCCEEW SNES GeoTIFF file paths
 SNES_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv')
@@ -825,31 +701,43 @@ def get_arr(row):
 tasks = (delayed(get_arr)(row) for _,row in SNES_meta.iterrows())
 for species,rank,arr in tqdm(Parallel(n_jobs=20, return_as='generator')(tasks), total=len(SNES_meta)):
     SNES_arr.loc[species, rank] = arr
-
-# Combine LIKELY and MAYBE into a single weighted layer:
-# Apply presence weights (LIKELY=0.8, MAYBE=0.3) to raw proportions.
-# Use LIKELY where present, fall back to MAYBE elsewhere.
-SNES_weighted_likely = SNES_arr.sel(presence='LIKELY') * bio_presence_weight['LIKELY']   # proportion * 0.8
-SNES_weighted_maybe  = SNES_arr.sel(presence='MAYBE') * bio_presence_weight['MAYBE']    # proportion * 0.3
-SNES_likely_and_maybe = np.maximum(SNES_weighted_likely, SNES_weighted_maybe)
-
-SNES_arr = xr.DataArray(
-    np.stack([SNES_weighted_likely.values, SNES_likely_and_maybe.values]),
-    dims=['presence', 'species', 'cell'],
-    coords={'presence': ['LIKELY', 'LIKELY_AND_MAYBE'], 'species': SNES_arr.species, 'cell': SNES_arr.cell}
-).transpose('species', 'presence', 'cell')
-
-
-# Save to nc, chunked by species
+    
+    
+    
+# Save raw data to nc, will be used for calculating targets
 SNES_arr.name = 'data'
 SNES_arr.to_netcdf(
     f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES.nc',
     mode='w',
     encoding={'data': {
         "compression": "gzip",
-        "compression_opts": 9,
+        "compression_opts": 5,
         "dtype": 'float32',
         "chunksizes": (1, 1, SNES_arr.sizes['cell'])}},
+    engine='h5netcdf'
+)
+
+
+# Combine LIKELY and MAYBE into a single weighted layer:
+SNES_likely = SNES_arr.sel(presence='LIKELY') * bio_presence_weight['LIKELY']
+SNES_maybe = SNES_arr.sel(presence='MAYBE') * bio_presence_weight['MAYBE']
+SNES_likely_and_maybe = np.maximum(SNES_likely, SNES_maybe)
+
+SNES_arr_weighted = xr.DataArray(
+    np.stack([SNES_likely.values, SNES_likely_and_maybe.values]),
+    dims=['presence', 'species', 'cell'],
+    coords={'presence': ['LIKELY', 'LIKELY_AND_MAYBE'], 'species': SNES_arr.species, 'cell': SNES_arr.cell}
+)
+
+SNES_arr_weighted.name = 'data'
+SNES_arr_weighted.to_netcdf(
+    f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES_weighted.nc',
+    mode='w',
+    encoding={'data': {
+        "compression": "gzip",
+        "compression_opts": 5,
+        "dtype": 'float32',
+        "chunksizes": (1, 1, SNES_arr_weighted.sizes['cell'])}},
     engine='h5netcdf'
 )
 
@@ -897,18 +785,18 @@ SNES_meta_att = SNES_meta_att.drop(columns=['PRESENCE_CATEGORY', 'PRESENCE_RANK'
 
 # Save the inside/outside LUTO data to csv
 SNES_df = SNES_in_out_LUTO_area.copy()
-SNES_df['BASELINE_LEVEL_ALL_AUSTRALIA'] = SNES_df['ALL_HA']
-SNES_df['BASEYEAR_LEVEL_INSIDE_LUTO_NATURAL'] = SNES_df['IN_LUTO_HA']
-SNES_df['BASEYEAR_LEVEL_OUT_LUTO_NATURAL'] = SNES_df['NATURAL_OUT_LUTO_HA']
-SNES_df['BASEYEAR_LEVEL_OUT_LUTO_NON_NATURAL'] = SNES_df['NON_NATURAL_OUT_LUTO_HA']
-SNES_df['BASEYEAR_SCORE'] = SNES_df['IN_LUTO_HA'] + SNES_df['NATURAL_OUT_LUTO_HA']
-SNES_df['BASEYEAR_LEVEL'] = SNES_df['BASEYEAR_SCORE'] / SNES_df['ALL_HA'] * 100
-SNES_df['ATTAINABLE_LEVEL'] = (1 - SNES_df['NON_NATURAL_OUT_LUTO_HA'] / SNES_df['ALL_HA']) * 100
+SNES_df['BASELINE_LEVEL_ALL_AUSTRALIA']         = SNES_df['ALL_HA']
+SNES_df['BASEYEAR_SCORE_INSIDE_LUTO_NATURAL']   = SNES_df['IN_LUTO_HA']
+SNES_df['BASEYEAR_SCORE_OUT_LUTO_NATURAL']      = SNES_df['NATURAL_OUT_LUTO_HA']
+SNES_df['BASEYEAR_SCORE_OUT_LUTO_NON_NATURAL']  = SNES_df['NON_NATURAL_OUT_LUTO_HA']
+SNES_df['BASEYEAR_SCORE']                       = SNES_df['IN_LUTO_HA'] + SNES_df['NATURAL_OUT_LUTO_HA']
+SNES_df['BASEYEAR_LEVEL']                       = SNES_df['BASEYEAR_SCORE'] / SNES_df['ALL_HA'] * 100
+SNES_df['ATTAINABLE_LEVEL']                     = (1 - SNES_df['NON_NATURAL_OUT_LUTO_HA'] / SNES_df['ALL_HA']) * 100
 
 # Drop unneeded columns, and split the data into three dataframes based on the PRESENCE_RANK
-SNES_df = SNES_df.drop(columns=['ALL_HA', 'IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA', 'NON_NATURAL_OUT_LUTO_HA', 'BASEYEAR_LEVEL_OUT_LUTO_NON_NATURAL', 'BASEYEAR_SCORE'])
+SNES_df = SNES_df.drop(columns=['ALL_HA', 'IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA', 'NON_NATURAL_OUT_LUTO_HA', 'BASEYEAR_SCORE_OUT_LUTO_NON_NATURAL', 'BASEYEAR_SCORE'])
 SNES_df_LIKELY = SNES_df.query('PRESENCE_RANK == "LIKELY"').copy().drop(columns=['PRESENCE_RANK'])
-SNES_df_LIKELY_MAYBE = SNES_df.query('PRESENCE_RANK == "LIKELY_AND_MAYBE"').copy().drop(columns=['PRESENCE_RANK'])
+SNES_df_LIKELY_MAYBE = SNES_df.query('PRESENCE_RANK == "MAYBE"').copy().drop(columns=['PRESENCE_RANK'])
 
 # Append suffix to the columns for the LIKELY and MAYBE dataframes
 SNES_df_LIKELY.columns = [f'{col}_LIKELY' if col != 'SCIENTIFIC_NAME' else 'SCIENTIFIC_NAME' for col in SNES_df_LIKELY.columns]
@@ -944,12 +832,12 @@ cols = ['SCIENTIFIC_NAME','VERNACULAR_NAME',
         'TARGET_LEVEL_2100_LIKELY_MAYBE',
 
         'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY',
-        'BASEYEAR_LEVEL_OUT_LUTO_NATURAL_LIKELY',
-        'BASEYEAR_LEVEL_INSIDE_LUTO_NATURAL_LIKELY',
+        'BASEYEAR_SCORE_OUT_LUTO_NATURAL_LIKELY',
+        'BASEYEAR_SCORE_INSIDE_LUTO_NATURAL_LIKELY',
 
         'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY_MAYBE',
-        'BASEYEAR_LEVEL_OUT_LUTO_NATURAL_LIKELY_MAYBE',
-        'BASEYEAR_LEVEL_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
+        'BASEYEAR_SCORE_OUT_LUTO_NATURAL_LIKELY_MAYBE',
+        'BASEYEAR_SCORE_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
 
         'LISTED_TAXON_ID','MAP_TAXON_ID', 'THREATENED_STATUS',
         'MIGRATORY_STATUS', 'MARINE', 'CETACEAN', 'EXTRACT_DATE', 'TAXON_GROUP',
@@ -962,7 +850,9 @@ SNES_df.to_csv(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES_target.csv', index=F
 
 
 
-# ------------------- Masking GEOTIFFs and save ECNES to NetCDF ------------------------------------------
+
+
+# ------------------- Assemble ECNES data into a single array ------------------------------------------
 
 # Read DCCEEW ECNES GeoTIFF file paths
 ECNES_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta.csv')
@@ -983,33 +873,46 @@ tasks = (delayed(get_arr)(row) for _,row in ECNES_meta.iterrows())
 for species,rank,arr in tqdm(Parallel(n_jobs=20, return_as='generator')(tasks), total=len(ECNES_meta)):
     ECNES_arr.loc[species,rank] = arr
 
-# Combine LIKELY and MAYBE into a single weighted layer:
-# Apply presence weights (LIKELY=0.8, MAYBE=0.3) to raw proportions.
-# Use LIKELY where present, fall back to MAYBE elsewhere.
-ECNES_weighted_likely = ECNES_arr.sel(presence='LIKELY') * bio_presence_weight['LIKELY']   # proportion * 0.8
-ECNES_weighted_maybe  = ECNES_arr.sel(presence='MAYBE') * bio_presence_weight['MAYBE']    # proportion * 0.3
-ECNES_likely_and_maybe = np.maximum(ECNES_weighted_likely, ECNES_weighted_maybe)
 
-ECNES_arr = xr.DataArray(
-    np.stack([ECNES_weighted_likely.values, ECNES_likely_and_maybe.values]),
-    dims=['presence', 'species', 'cell'],
-    coords={'presence': ['LIKELY', 'LIKELY_AND_MAYBE'], 'species': ECNES_arr.species, 'cell': ECNES_arr.cell}
-).transpose('species', 'presence', 'cell')
-
-
-
-# Save to nc, chunked by species
+# Save raw data to nc, raw data will be used to calculate targets
 ECNES_arr.name = 'data'
 ECNES_arr.to_netcdf(
     f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES.nc',
     mode='w',
     encoding={'data': {
         "compression": "gzip",
-        "compression_opts": 9,
+        "compression_opts": 5,
         "dtype": 'float32',
         "chunksizes": (1, 1, ECNES_arr.sizes['cell'])}},
     engine='h5netcdf'
 )
+
+
+
+# Combine LIKELY and MAYBE into a single weighted layer:
+ECNES_likely = ECNES_arr.sel(presence='LIKELY') * bio_presence_weight['LIKELY']
+ECNES_maybe = ECNES_arr.sel(presence='MAYBE') * bio_presence_weight['MAYBE']
+ECNES_likely_and_maybe = np.maximum(ECNES_likely, ECNES_maybe)
+
+ECNES_arr_weighted = xr.DataArray(
+    np.stack([ECNES_likely.values, ECNES_likely_and_maybe.values]),
+    dims=['presence', 'species', 'cell'],
+    coords={'presence': ['LIKELY', 'LIKELY_AND_MAYBE'], 'species': ECNES_arr.species, 'cell': ECNES_arr.cell}
+).transpose('species', 'presence', 'cell')
+
+ECNES_arr_weighted.name = 'data'
+ECNES_arr_weighted.to_netcdf(
+    f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES_weighted.nc',
+    mode='w',
+    encoding={'data': {
+        "compression": "gzip",
+        "compression_opts": 5,
+        "dtype": 'float32',
+        "chunksizes": (1, 1, ECNES_arr_weighted.sizes['cell'])}},
+    engine='h5netcdf'
+)
+
+
 
 
 
@@ -1019,10 +922,10 @@ ECNES_arr = xr.open_dataarray(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES.nc',
 
 
 def get_area(arr):
-    score_area_weighted_all_Australia = arr * zones['CELL_HA'].values
-    score_area_weighted_in_LUTO = arr * idx_in_LUTO * zones['CELL_HA'].values * biodiv_degrade_ly
-    score_area_weighted_out_LUTO_nat = arr * idx_out_LUTO_natural * zones['CELL_HA'].values
-    score_area_weighted_out_LUTO_non_nat = arr * idx_out_LUTO_non_natural * zones['CELL_HA'].values
+    score_area_weighted_all_Australia       = arr * zones['CELL_HA'].values
+    score_area_weighted_in_LUTO             = arr * idx_in_LUTO * zones['CELL_HA'].values * biodiv_degrade_ly
+    score_area_weighted_out_LUTO_nat        = arr * idx_out_LUTO_natural * zones['CELL_HA'].values
+    score_area_weighted_out_LUTO_non_nat    = arr * idx_out_LUTO_non_natural * zones['CELL_HA'].values
     return [{
         'ALL_HA':score_area_weighted_all_Australia.sum(),
         'IN_LUTO_HA':score_area_weighted_in_LUTO.sum(),
@@ -1056,12 +959,12 @@ ECNES_meta_att = ECNES_meta_att.drop(columns=['PRES_RANK', 'SHAPE_Length', 'SHAP
 
 # Save the inside/outside LUTO data to csv
 ECNES_df = ECNES_in_out_LUTO_area.copy().reset_index()
-ECNES_df['BASELINE_LEVEL_ALL_AUSTRALIA'] = ECNES_df['ALL_HA']
-ECNES_df['BASEYEAR_LEVEL_INSIDE_LUTO_NATURAL'] = ECNES_df['IN_LUTO_HA']
-ECNES_df['BASEYEAR_LEVEL_OUT_LUTO_NATURAL'] = ECNES_df['NATURAL_OUT_LUTO_HA']
-ECNES_df['BASEYEAR_SCORE'] = ECNES_df['IN_LUTO_HA'] + ECNES_df['NATURAL_OUT_LUTO_HA']
-ECNES_df['BASEYEAR_LEVEL'] = ECNES_df['BASEYEAR_SCORE'] / ECNES_df['ALL_HA'] * 100
-ECNES_df['ATTAINABLE_LEVEL'] = (1 - ECNES_df['NON_NATURAL_OUT_LUTO_HA'] / ECNES_df['ALL_HA']) * 100
+ECNES_df['BASELINE_LEVEL_ALL_AUSTRALIA']            = ECNES_df['ALL_HA']
+ECNES_df['BASEYEAR_SCORE_INSIDE_LUTO_NATURAL']      = ECNES_df['IN_LUTO_HA']
+ECNES_df['BASEYEAR_SCORE_OUT_LUTO_NATURAL']         = ECNES_df['NATURAL_OUT_LUTO_HA']
+ECNES_df['BASEYEAR_SCORE']                          = ECNES_df['IN_LUTO_HA'] + ECNES_df['NATURAL_OUT_LUTO_HA']
+ECNES_df['BASEYEAR_LEVEL']                          = ECNES_df['BASEYEAR_SCORE'] / ECNES_df['ALL_HA'] * 100
+ECNES_df['ATTAINABLE_LEVEL']                        = (1 - ECNES_df['NON_NATURAL_OUT_LUTO_HA'] / ECNES_df['ALL_HA']) * 100
 
 # Fill the missing COMMUNITY and PRES_RANK with nan
 re_index = pd.MultiIndex.from_product([ECNES_df['COMMUNITY'].unique(), ECNES_df['PRES_RANK'].unique()], names=['COMMUNITY', 'PRES_RANK'])
@@ -1070,7 +973,7 @@ ECNES_df = ECNES_df.set_index(['COMMUNITY', 'PRES_RANK']).reindex(re_index).rese
 # Drop unneeded columns, and split the data into three dataframes based on the PRES_RANK
 ECNES_df = ECNES_df.drop(columns=['ALL_HA', 'IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA', 'NON_NATURAL_OUT_LUTO_HA', 'BASEYEAR_SCORE'])
 ECNES_df_LIKELY = ECNES_df.query('PRES_RANK == "LIKELY"').copy().drop(columns=['PRES_RANK'])
-ECNES_df_LIKELY_MAYBE = ECNES_df.query('PRES_RANK == "LIKELY_AND_MAYBE"').copy().drop(columns=['PRES_RANK'])
+ECNES_df_LIKELY_MAYBE = ECNES_df.query('PRES_RANK == "MAYBE"').copy().drop(columns=['PRES_RANK'])
 
 # Append suffix to the columns for the LIKELY and MAYBE dataframes
 ECNES_df_LIKELY.columns = [f'{col}_LIKELY' if col != 'COMMUNITY' else 'COMMUNITY' for col in ECNES_df_LIKELY.columns]
@@ -1105,12 +1008,12 @@ cols = ['COMMUNITY',
         'TARGET_LEVEL_2100_LIKELY_MAYBE',
 
         'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY',
-        'BASEYEAR_LEVEL_OUT_LUTO_NATURAL_LIKELY',
-        'BASEYEAR_LEVEL_INSIDE_LUTO_NATURAL_LIKELY',
+        'BASEYEAR_SCORE_OUT_LUTO_NATURAL_LIKELY',
+        'BASEYEAR_SCORE_INSIDE_LUTO_NATURAL_LIKELY',
 
         'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY_MAYBE',
-        'BASEYEAR_LEVEL_OUT_LUTO_NATURAL_LIKELY_MAYBE',
-        'BASEYEAR_LEVEL_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
+        'BASEYEAR_SCORE_OUT_LUTO_NATURAL_LIKELY_MAYBE',
+        'BASEYEAR_SCORE_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
 
         'CATEGORY', 'COM_ID','EPBC', 'EXTRACTED', 'CELL_SIZE', 'REGIONS', 'CITATION', 'SPRAT']
 
@@ -1125,14 +1028,40 @@ ECNES_df.to_csv(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES_target.csv', index
 
 # ------------------- Apply Zonation algorithm to merged data ------------------------------------------
 
+# Define the path to the Zonation executable
 zonation_exe = 'C:/Program Files (x86)/Zonation5/z5.exe'
 
-snes_likely_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv').query('PRESENCE_RANK == 2')['TIF_PATH'].values
-ecnes_likely_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta.csv').query('PRES_RANK == 2')['TIF_PATH'].values
-snes_likely_may_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta_merged.csv')['TIF_PATH'].values
-ecnes_likely_may_tifs = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_ECNES_meta_merged.csv')['TIF_PATH'].values
-mnes_likely_tifs = snes_likely_tifs.tolist() + ecnes_likely_tifs.tolist()
-mnes_likely_may_tifs = snes_likely_may_tifs.tolist() + ecnes_likely_may_tifs.tolist()
+# Save weighted SNES and ECNES data to GeoTIFFs for Zonation input
+SNES_arr_weighted = xr.open_dataarray(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES_weighted.nc', chunks={})
+ECNES_arr_weighted = xr.open_dataarray(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES_weighted.nc', chunks={})
+
+xy = np.nonzero(NLUM.values)
+def _save_weighted_tif(data_array, species, presence, out_dir, subdir, meta):
+    arr_2D = np.full((meta['height'], meta['width']), np.nan, dtype=np.float32)
+    arr_2D[xy] = data_array.sel(species=species, presence=presence).values
+    safe_name = re.sub(r'[^a-zA-Z0-9]', '_', species)
+    save_path = f'{out_dir}/Processed/SNES_ECNES_WEIGHTED/{subdir}/{safe_name}_{presence}.tif'
+    with rasterio.open(save_path, 'w', **meta) as dst:
+        dst.write(arr_2D, 1)
+
+_weighted_tasks = [
+    delayed(_save_weighted_tif)(da, species, presence, SNES_ECNES_dir, subdir, ref_meta_float)
+    for da, subdir in ((SNES_arr_weighted, 'SNES'), (ECNES_arr_weighted, 'ECNES'))
+    for species, presence in product(da['species'].values, da['presence'].values)
+]
+
+for _ in tqdm(Parallel(n_jobs=-1, return_as='generator')(_weighted_tasks), total=len(_weighted_tasks)):
+    pass
+
+
+
+# Collect the TIF paths for the LIKELY and MAYBE layers for SNES and ECNES, and save to txt files for Zonation input
+snes_likely_tifs =      glob(f'{SNES_ECNES_dir}/Processed/SNES_ECNES_WEIGHTED/SNES/*_LIKELY.tif')
+ecnes_likely_tifs =     glob(f'{SNES_ECNES_dir}/Processed/SNES_ECNES_WEIGHTED/ECNES/*_LIKELY.tif')
+snes_likely_may_tifs =  glob(f'{SNES_ECNES_dir}/Processed/SNES_ECNES_WEIGHTED/SNES/*_LIKELY_AND_MAYBE.tif')
+ecnes_likely_may_tifs = glob(f'{SNES_ECNES_dir}/Processed/SNES_ECNES_WEIGHTED/ECNES/*_LIKELY_AND_MAYBE.tif')
+mnes_likely_tifs = snes_likely_tifs + ecnes_likely_tifs
+mnes_likely_may_tifs = snes_likely_may_tifs + ecnes_likely_may_tifs
 
 
 # Save the TIF path to txt files
@@ -1144,17 +1073,17 @@ with open(f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_files.txt', 'w') as 
      open(f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_may_files.txt', 'w') as f_mnes_likely_may:
          
     f_snes_likely.write('filename\n')
-    f_snes_likely.write('\n'.join(snes_likely_tifs))
+    f_snes_likely.write('\n'.join(f'"{p}"' for p in snes_likely_tifs))
     f_ecnes_likely.write('filename\n')
-    f_ecnes_likely.write('\n'.join(ecnes_likely_tifs))
+    f_ecnes_likely.write('\n'.join(f'"{p}"' for p in ecnes_likely_tifs))
     f_snes_likely_may.write('filename\n')
-    f_snes_likely_may.write('\n'.join(snes_likely_may_tifs))
+    f_snes_likely_may.write('\n'.join(f'"{p}"' for p in snes_likely_may_tifs))
     f_ecnes_likely_may.write('filename\n')
-    f_ecnes_likely_may.write('\n'.join(ecnes_likely_may_tifs))
+    f_ecnes_likely_may.write('\n'.join(f'"{p}"' for p in ecnes_likely_may_tifs))
     f_mnes_likely.write('filename\n')
-    f_mnes_likely.write('\n'.join(mnes_likely_tifs))
+    f_mnes_likely.write('\n'.join(f'"{p}"' for p in mnes_likely_tifs))
     f_mnes_likely_may.write('filename\n')
-    f_mnes_likely_may.write('\n'.join(mnes_likely_may_tifs))
+    f_mnes_likely_may.write('\n'.join(f'"{p}"' for p in mnes_likely_may_tifs))
     
     
 # Create mask and hierarchy TIF
@@ -1187,86 +1116,66 @@ with open(f'{SNES_ECNES_dir}/Processed/Zonation/snes_likely_settings.txt', 'w') 
      open(f'{SNES_ECNES_dir}/Processed/Zonation/mnes_likely_settings.txt', 'w') as mnes_likely_settings,\
      open(f'{SNES_ECNES_dir}/Processed/Zonation/mnes_likely_may_settings.txt', 'w') as mnes_likely_may_settings:
          
-    snes_likely_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/SNES_likely_files.txt
-    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
-    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
-    '''.replace('    ', ''))
+    snes_likely_settings.write((
+        f'feature list file = {SNES_ECNES_dir}/Processed/Zonation/SNES_likely_files.txt\n'
+        f'analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif\n'
+        f'hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif\n'
+    ))
     
-    ecnes_likely_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_files.txt
-    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
-    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
-    '''.replace('    ', ''))
-    
-    snes_likely_may_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/SNES_likely_may_files.txt
-    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
-    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
-    '''.replace('    ', ''))
-    
-    ecnes_likely_may_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_files.txt
-    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
-    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
-    '''.replace('    ', ''))
-    
-    mnes_likely_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/MNES_likely_files.txt
-    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
-    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
-    '''.replace('    ', ''))
-    
-    mnes_likely_may_settings.write(f'''feature list file = {SNES_ECNES_dir}/Processed/Zonation/MNES_likely_may_files.txt
-    analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif
-    hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif
-    '''.replace('    ', ''))
+    ecnes_likely_settings.write((
+        f'feature list file = {SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_files.txt\n'
+        f'analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif\n'
+        f'hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif\n'
+    ))
+
+    snes_likely_may_settings.write((
+        f'feature list file = {SNES_ECNES_dir}/Processed/Zonation/SNES_likely_may_files.txt\n'
+        f'analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif\n'
+        f'hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif\n'
+    ))
+
+    ecnes_likely_may_settings.write((
+        f'feature list file = {SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_files.txt\n'
+        f'analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif\n'
+        f'hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif\n'
+    ))
+
+    mnes_likely_settings.write((
+        f'feature list file = {SNES_ECNES_dir}/Processed/Zonation/MNES_likely_files.txt\n'
+        f'analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif\n'
+        f'hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif\n'
+    ))
+
+    mnes_likely_may_settings.write((
+        f'feature list file = {SNES_ECNES_dir}/Processed/Zonation/MNES_likely_may_files.txt\n'
+        f'analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif\n'
+        f'hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif\n'
+    ))
 
   
 
-# Execute zonation
-subprocess.run([
-    zonation_exe,
-    '--mode=CAZMAX', 
-    '-ah',
-    f'{SNES_ECNES_dir}/Processed/Zonation/snes_likely_settings.txt',
-    f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_Priority' 
-])
+# Execute zonation in parallel
+zonation_runs = [
+    ('snes_likely_settings.txt',     'SNES_likely_Priority'),
+    ('ecnes_likely_settings.txt',    'ECNES_likely_Priority'),
+    ('snes_likely_may_settings.txt', 'SNES_likely_may_Priority'),
+    ('ecnes_likely_may_settings.txt','ECNES_likely_may_Priority'),
+    ('mnes_likely_settings.txt',     'MNES_likely_Priority'),
+    ('mnes_likely_may_settings.txt', 'MNES_likely_may_Priority'),
+]
 
-subprocess.run([
-    zonation_exe,
-    '--mode=CAZMAX',
-    '-ah',
-    f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_likely_settings.txt',
-    f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_Priority'
-])
+zonation_procs = [
+    subprocess.Popen([
+        zonation_exe, '--mode=CAZMAX', '-ah',
+        f'{SNES_ECNES_dir}/Processed/Zonation/{settings}',
+        f'{SNES_ECNES_dir}/Processed/Zonation/{output}'
+    ]) for settings, output in zonation_runs
+]
 
-subprocess.run([
-    zonation_exe,
-    '--mode=CAZMAX',
-    '-ah',
-    f'{SNES_ECNES_dir}/Processed/Zonation/snes_likely_may_settings.txt',
-    f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_may_Priority'
-])
-
-subprocess.run([
-    zonation_exe,
-    '--mode=CAZMAX',
-    '-ah',
-    f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_likely_may_settings.txt',
-    f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_Priority'
-])
-
-subprocess.run([
-    zonation_exe,
-    '--mode=CAZMAX',
-    '-ah',  
-    f'{SNES_ECNES_dir}/Processed/Zonation/mnes_likely_settings.txt',
-    f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_Priority'
-])
-
-subprocess.run([
-    zonation_exe,
-    '--mode=CAZMAX',
-    '-ah',
-    f'{SNES_ECNES_dir}/Processed/Zonation/mnes_likely_may_settings.txt',
-    f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_may_Priority'
-])
+for proc, (settings, _) in zip(zonation_procs, zonation_runs):
+    rc = proc.wait()
+    if rc != 0:
+        print(f'WARNING: Zonation failed for {settings} (exit code {rc})')
 
 
 # Merge all zonation layers and save as NetCDF
@@ -1299,7 +1208,7 @@ zonation_arr.to_netcdf(
     mode='w', 
     encoding={'data': {
         "compression": "gzip", 
-        "compression_opts": 9,
+        "compression_opts": 5,
         "dtype": 'float32'
         },
     },
@@ -1515,7 +1424,7 @@ for gdb_path, layer_raster, layer_attribute in files:
     
     # Save xarray DataArray to NetCDF
     save_path = f'{NVIS_SAVE_path}/{layer_raster}.nc'
-    encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}} 
+    encoding = {'data': {"compression": "gzip", "compression_opts": 5,  "dtype": 'uint8'}} 
     dst_array_xr.name = 'data'
     dst_array_xr.to_netcdf(save_path, encoding=encoding, engine='h5netcdf')
 
@@ -1539,7 +1448,7 @@ for gdb_path, layer_raster, layer_attribute in files:
     dst_array_xr = dst_array_xr.sortby('group')
     
     # Save xarray DataArray to NetCDF
-    encoding = {'data': {"compression": "gzip", "compression_opts": 9,  "dtype": 'uint8'}}
+    encoding = {'data': {"compression": "gzip", "compression_opts": 5,  "dtype": 'uint8'}}
     output_layer_name = layer_raster.replace('_ALB', '')
     
     # Use each separate group layer, which is the percentage [0-100], to represent the cell
@@ -1611,107 +1520,6 @@ csv_files = {
 with pd.ExcelWriter(NVIS_SAVE_path + '/BIODIVERSITY_GBF3_NVIS_SCORES_AND_TARGETS.xlsx') as writer:
     for sheet_name, df in csv_files.items():
         df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-
-
-#######################################################################################################
-#      Interim Biogeographic Regionalisation for Australia (IBRA)  (GBF3) with Xarray                 #
-#######################################################################################################
-
-IBRA_reg_all = zones.groupby(['IBRA_REG_NAME_7'], observed=True
-    )[['CELL_HA']].sum(
-    ).reset_index(
-    ).rename(
-        columns={
-            'IBRA_REG_NAME_7': 'IBRA_REG_NAME',
-            'CELL_HA': 'AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA'
-        }
-    )
-IBRA_reg_in_LUTO = (zones['CELL_HA'][idx_in_LUTO] * biodiv_degrade_ly[idx_in_LUTO]
-    ).reset_index(
-    ).set_index(zones['IBRA_REG_NAME_7'][idx_in_LUTO]
-    ).groupby(['IBRA_REG_NAME_7'], observed=True
-    )[['CELL_HA']].sum(
-    ).reset_index(
-    ).rename(
-        columns={
-            'IBRA_REG_NAME_7': 'IBRA_REG_NAME',
-            'CELL_HA': 'AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA'
-        }
-    )
-IBRA_reg_out_LUTO_natural = zones.loc[idx_out_LUTO_natural].groupby(['IBRA_REG_NAME_7'], observed=True
-    )[['CELL_HA']].sum(
-    ).reset_index(
-    ).rename(
-        columns={
-            'IBRA_REG_NAME_7': 'IBRA_REG_NAME',
-            'CELL_HA': 'AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA'
-        }
-    )
-
-IBRA_sub_all = zones.groupby(['IBRA_SUB_NAME_7'], observed=True
-    )[['CELL_HA']].sum(
-    ).reset_index(
-    ).rename(
-        columns={
-            'IBRA_SUB_NAME_7': 'IBRA_SUBREG_NAME',
-            'CELL_HA': 'AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA'
-        }
-    )
-IBRA_sub_in_LUTO = (zones['CELL_HA'][idx_in_LUTO] * biodiv_degrade_ly[idx_in_LUTO]
-    ).reset_index(
-    ).set_index(zones['IBRA_SUB_NAME_7'][idx_in_LUTO]
-    ).groupby(['IBRA_SUB_NAME_7'], observed=True
-    )[['CELL_HA']].sum(
-    ).reset_index(
-    ).rename(
-        columns={
-            'IBRA_SUB_NAME_7': 'IBRA_SUBREG_NAME',
-            'CELL_HA': 'AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA'
-        }
-    )
-IBRA_sub_out_LUTO_natural = zones.loc[idx_out_LUTO_natural].groupby(['IBRA_SUB_NAME_7'], observed=True
-    )[['CELL_HA']].sum(
-    ).reset_index(
-    ).rename(
-        columns={
-            'IBRA_SUB_NAME_7': 'IBRA_SUBREG_NAME',
-            'CELL_HA': 'AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA'
-        }
-    )
-
-# Merge the dataframes
-IBRA_reg = IBRA_reg_all.merge(IBRA_reg_in_LUTO, on='IBRA_REG_NAME').merge(IBRA_reg_out_LUTO_natural, on='IBRA_REG_NAME').rename(columns={'IBRA_REG_NAME':'Region'})
-IBRA_sub = IBRA_sub_all.merge(IBRA_sub_in_LUTO, on='IBRA_SUBREG_NAME').merge(IBRA_sub_out_LUTO_natural, on='IBRA_SUBREG_NAME').rename(columns={'IBRA_SUBREG_NAME':'Region'})
-
-# Calculate the percentage of base-year biodiversity socre to pre-1750 level of the base year
-IBRA_reg.insert(1, 'BASE_YR_PERCENT', IBRA_reg.eval(
-    '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
-    / AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA * 100'))
-IBRA_sub.insert(1, 'BASE_YR_PERCENT', IBRA_sub.eval(
-    '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
-    / AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA * 100'))
-
-
-# Append a user-defined target column
-IBRA_reg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', 50)
-IBRA_reg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', 50)
-IBRA_reg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', 30)
-IBRA_sub.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', 50)
-IBRA_sub.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', 50)
-IBRA_sub.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', 30)
-
-# Combine all CSVs and save them to Excel
-csv_files = {
-    'IBRA_Regions': IBRA_reg,
-    'IBRA_Subregions': IBRA_sub
-}
-
-with pd.ExcelWriter(IBRA_save_path + '/BIODIVERSITY_GBF3_IBRA_SCORES_AND_TARGETS.xlsx') as writer:
-    for sheet_name, df in csv_files.items():
-        df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-
 
 
 
