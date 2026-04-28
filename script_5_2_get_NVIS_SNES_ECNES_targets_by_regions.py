@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 import rioxarray as rxr
 import xarray as xr
+from script_5_0_SNES_ECNES_selected import NECMA_SNES, GBCMA_SNES, NECMA_ECNES, GBCMA_ECNES
 
 
 
@@ -121,17 +122,6 @@ def add_derived_cols(df: pd.DataFrame) -> pd.DataFrame:
     return df[df['ALL_HA'] > 0].reset_index(drop=True)
 
 
-# Column rename dictionaries — map internal names to 5_1-consistent output names
-rename_nvis = {
-    'BASEYEAR_LEVEL':      'BASE_YR_PERCENT',
-    'TARGET_LEVEL_2030':   'USER_DEFINED_TARGET_PERCENT_2030',
-    'TARGET_LEVEL_2050':   'USER_DEFINED_TARGET_PERCENT_2050',
-    'TARGET_LEVEL_2100':   'USER_DEFINED_TARGET_PERCENT_2100',
-    'ALL_HA':              'AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA',
-    'IN_LUTO_HA':          'AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA',
-    'NATURAL_OUT_LUTO_HA': 'AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA',
-}
-
 rename_likely = {
     'ATTAINABLE_LEVEL':    'ATTAINABLE_LEVEL_LIKELY',
     'BASEYEAR_LEVEL':      'BASEYEAR_LEVEL_LIKELY',
@@ -166,12 +156,14 @@ _DROP_INTERNAL = ['NON_NATURAL_OUT_LUTO_HA', 'BASEYEAR_SCORE']
 
 nrm_nvis_col_order = [
     'group', 'region',
-    'BASE_YR_PERCENT',
-    'USER_DEFINED_TARGET_PERCENT_2030', 'USER_DEFINED_TARGET_PERCENT_2050', 'USER_DEFINED_TARGET_PERCENT_2100',
-    'AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA',
-    'AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA',
-    'AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA',
     'ATTAINABLE_LEVEL',
+    'BASEYEAR_LEVEL',
+    'TARGET_LEVEL_2030',
+    'TARGET_LEVEL_2050',
+    'TARGET_LEVEL_2100',
+    'ALL_HA',
+    'NATURAL_OUT_LUTO_HA',
+    'IN_LUTO_HA',
 ]
 
 nrm_nvis_results = {}
@@ -183,12 +175,11 @@ for sheet_name, nc_path in [
 
     df = compute_region_scores(xr_pre, nrm_region_per_cell).to_dataframe().reset_index()
     df = add_derived_cols(df)
-    df = df.rename(columns=rename_nvis)
 
     mask = df['region'].isin(NECMA_NRM_NAMES)
-    df.loc[mask, 'USER_DEFINED_TARGET_PERCENT_2030'] = 30
-    df.loc[mask, 'USER_DEFINED_TARGET_PERCENT_2050'] = 50
-    df.loc[mask, 'USER_DEFINED_TARGET_PERCENT_2100'] = 50
+    df.loc[mask, 'TARGET_LEVEL_2030'] = 30
+    df.loc[mask, 'TARGET_LEVEL_2050'] = 50
+    df.loc[mask, 'TARGET_LEVEL_2100'] = 50
 
     nrm_nvis_results[sheet_name] = df[nrm_nvis_col_order]
 
@@ -279,27 +270,27 @@ ones_arr = xr.DataArray(np.ones(len(cell_ha), dtype=np.float32), dims=['cell'])
 
 ibra_col_order = [
     'Region',
-    'BASE_YR_PERCENT',
-    'USER_DEFINED_TARGET_PERCENT_2030', 'USER_DEFINED_TARGET_PERCENT_2050', 'USER_DEFINED_TARGET_PERCENT_2100',
-    'AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA',
-    'AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA',
-    'AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA',
     'ATTAINABLE_LEVEL',
+    'BASEYEAR_LEVEL',
+    'TARGET_LEVEL_2030', 'TARGET_LEVEL_2050', 'TARGET_LEVEL_2100',
+    'ALL_HA',
+    'NATURAL_OUT_LUTO_HA',
+    'IN_LUTO_HA',
 ]
 
 ibra_reg_df = compute_region_scores(ones_arr, ibra_reg_per_cell).to_dataframe().reset_index()
 ibra_reg_df = add_derived_cols(ibra_reg_df)
-ibra_reg_df = ibra_reg_df.rename(columns={'region': 'Region', **rename_nvis})
-ibra_reg_df['USER_DEFINED_TARGET_PERCENT_2030'] = 30
-ibra_reg_df['USER_DEFINED_TARGET_PERCENT_2050'] = 50
-ibra_reg_df['USER_DEFINED_TARGET_PERCENT_2100'] = 50
+ibra_reg_df = ibra_reg_df.rename(columns={'region': 'Region'})
+ibra_reg_df['TARGET_LEVEL_2030'] = 30
+ibra_reg_df['TARGET_LEVEL_2050'] = 50
+ibra_reg_df['TARGET_LEVEL_2100'] = 50
 
 ibra_sub_df = compute_region_scores(ones_arr, ibra_sub_per_cell).to_dataframe().reset_index()
 ibra_sub_df = add_derived_cols(ibra_sub_df)
-ibra_sub_df = ibra_sub_df.rename(columns={'region': 'Region', **rename_nvis})
-ibra_sub_df['USER_DEFINED_TARGET_PERCENT_2030'] = 30
-ibra_sub_df['USER_DEFINED_TARGET_PERCENT_2050'] = 50
-ibra_sub_df['USER_DEFINED_TARGET_PERCENT_2100'] = 50
+ibra_sub_df = ibra_sub_df.rename(columns={'region': 'Region'})
+ibra_sub_df['TARGET_LEVEL_2030'] = 30
+ibra_sub_df['TARGET_LEVEL_2050'] = 50
+ibra_sub_df['TARGET_LEVEL_2100'] = 50
 
 with pd.ExcelWriter(f'{NVIS_SAVE_path}/BIODIVERSITY_GBF3_NVIS_SCORES_AND_TARGETS_IBRA.xlsx') as writer:
     ibra_reg_df[ibra_col_order].to_excel(writer, sheet_name='NVIS_MVG', index=False)
@@ -356,63 +347,6 @@ the targets should be >=50% by 2030, and >=70% by 2050/2100, in the NRM region(s
 
 NECMA only specify targets for LIKELY, but we apply the same targets to LIKELY_AND_MAYBE to be precautionary. 
 '''
-
-# SNES/ECNES GBF4: >=50% by 2030, >=70% by 2050/2100 for listed species/communities per NRM region
-NECMA_SNES = [
-    'Euphrasia eichleri', 'Grevillea burrowa', 'Glycine latrobeana',
-    'Pomaderris subplicata', 'Caladenia concolor', 'Pterostylis X aenigma',
-    'Sannantha crenulata', 'Grevillea jephcottii', 'Zieria citriodora',
-    'Banksia canei', 'Acacia phasmoides', 'Argyrotegium nitidulum',
-    'Kelleria bogongensis', 'Lobelia gelida', 'Euphrasia crassiuscula subsp. glandulifera',
-    'Eucalyptus cadens', 'Rostratula australis', 'Ninox connivens',
-    'Burhinus grallarius', 'Anthochaera phrygia', 'Lathamus discolor',
-    'Mastacomys fuscus mordicus', 'Potorous longipes', 'Burramys parvus',
-    'Ornithorhynchus anatinus', 'Pseudomys fumeus', 'Petauroides volans',
-    'Dasyurus maculatus maculatus', 'Litoria verreauxii alpina',
-    'Litoria booroolongensis', 'Crinia sloanei', 'Litoria spenceri',
-    'Pseudemoia cryodroma', 'Cyclodomorphus praealtus', 'Vermicella annulata',
-    'Liopholis guthega', 'Morelia spilota metcalfei', 'Thaumatoperla alpina',
-    'Synemon plana', 'Keyacris scurra', 'Galaxias rostratus',
-    'Macquaria australasica', 'Maccullochella peelii', 'Nannoperca australis',
-    'Maccullochella macquariensis',
-]
-
-GBCMA_SNES = [
-    'Galaxias rostratus', 'Bidyanus bidyanus', 'Galaxias fuscus',
-    'Maccullochella macquariensis', 'Macquaria australasica', 'Maccullochella peelii',
-    'Nannoperca australis Murray-Darling Basin lineage', 'Lathamus discolor', 'Anthochaera phrygia',
-    'Gymnobelideus leadbeateri', 'Litoria spenceri', 'Pomaderris vacciniifolia',
-    'Pimelea spinescens subsp. spinescens', 'Botaurus poiciloptilus', 'Burramys parvus',
-    'Senecio behrianus', 'Eucalyptus alligatrix subsp. limaensis', 'Eucalyptus crenulata',
-    'Polytelis swainsonii', 'Litoria raniformis', 'Pteropus poliocephalus',
-    'Falco hypoleucos', 'Hirundapus caudacutus', 'Grantiella picta',
-    'Delma impar', 'Synemon plana', 'Melanodryas cucullata',
-    'Calochilus richiae', 'Swainsona recta', 'Sclerolaena napiformis',
-    'Euphrasia collina subsp. muelleri', 'Dianella amoena', 'Glycine latrobeana',
-    'Caladenia concolor', 'Hibbertia humifusa subsp. erigens', 'Rostratula australis',
-    'Crinia sloanei', 'Calidris ferruginea', 'Brachyscome muelleroides',
-    'Myriophyllum porcatum', 'Swainsona murrayana', 'Swainsona plagiotropis',
-    'Amphibromus fluitans', 'Lepidium monoplocoides', 'Callocephalon fimbriatum',
-    'Dasyurus maculatus maculatus', 'Petauroides volans', 'Pseudomys fumeus',
-    'Liopholis montana', 'Pycnoptilus floccosus', 'Petaurus australis',
-    'Mastacomys fuscus mordicus',
-]
-
-NECMA_ECNES = [
-    'Alpine Sphagnum Bogs and Associated Fens',
-    'Buloke Woodlands of the Riverina and Murray-Darling Depression Bioregions',
-    'Grey Box (Eucalyptus microcarpa) Grassy Woodlands and Derived Native Grasslands of South-eastern Australia',
-    "White Box-Yellow Box-Blakely's Red Gum Grassy Woodland and Derived Native Grassland",
-]
-
-GBCMA_ECNES = [
-    'Seasonal Herbaceous Wetlands (Freshwater) of the Temperate Lowland Plains',
-    "White Box-Yellow Box-Blakely's Red Gum Grassy Woodland and Derived Native Grassland",
-    'Natural Grasslands of the Murray Valley Plains',
-    'Alpine Sphagnum Bogs and Associated Fens',
-    'Grey Box (Eucalyptus microcarpa) Grassy Woodlands and Derived Native Grasslands of South-eastern Australia',
-    'Buloke Woodlands of the Riverina and Murray-Darling Depression Bioregions',
-]
 
 for df, key_col, region_lists in [
     (snes_df_nrm,  'SCIENTIFIC_NAME', [('North East', NECMA_SNES),  ('Goulburn Broken', GBCMA_SNES)]),

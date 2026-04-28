@@ -18,6 +18,7 @@ from rasterio import features
 from rasterio.warp import reproject
 from pyproj import CRS
 from affine import Affine
+from script_5_0_SNES_ECNES_selected import SNES_AUSTRALIA, ECNES_AUSTRALIA
 
 
 
@@ -371,9 +372,9 @@ bio_target = bio_target.rename(columns={
 })
 
 
-bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', np.nan)
-bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', np.nan)
-bio_target.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', np.nan)
+bio_target.insert(2, 'TARGET_LEVEL_2100', np.nan)
+bio_target.insert(2, 'TARGET_LEVEL_2050', np.nan)
+bio_target.insert(2, 'TARGET_LEVEL_2030', np.nan)
 bio_target.to_csv(f'{bio_Carla_NetCDF_dir}/BIODIVERSITY_GBF8_TARGET.csv', index=False)
 
 
@@ -846,6 +847,13 @@ cols = ['SCIENTIFIC_NAME','VERNACULAR_NAME',
         'SPRAT_PROFILE']
 
 SNES_df = SNES_df[cols]
+
+# Set Australia-wide targets for selected species (same targets as NECMA/GBCMA contract)
+mask = SNES_df['SCIENTIFIC_NAME'].isin(SNES_AUSTRALIA)
+SNES_df.loc[mask, 'TARGET_LEVEL_2030_LIKELY'] = 50
+SNES_df.loc[mask, 'TARGET_LEVEL_2050_LIKELY'] = 70
+SNES_df.loc[mask, 'TARGET_LEVEL_2100_LIKELY'] = 70
+
 SNES_df.to_csv(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES_target.csv', index=False)
 
 
@@ -1018,6 +1026,13 @@ cols = ['COMMUNITY',
         'CATEGORY', 'COM_ID','EPBC', 'EXTRACTED', 'CELL_SIZE', 'REGIONS', 'CITATION', 'SPRAT']
 
 ECNES_df = ECNES_df[cols]
+
+# Set Australia-wide targets for selected communities (same targets as NECMA/GBCMA contract)
+mask = ECNES_df['COMMUNITY'].isin(ECNES_AUSTRALIA)
+ECNES_df.loc[mask, 'TARGET_LEVEL_2030_LIKELY'] = 50
+ECNES_df.loc[mask, 'TARGET_LEVEL_2050_LIKELY'] = 70
+ECNES_df.loc[mask, 'TARGET_LEVEL_2100_LIKELY'] = 70
+
 ECNES_df.to_csv(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES_target.csv', index=False)
 
 
@@ -1469,47 +1484,51 @@ NVIS_pre_mvs_xr = xr.load_dataarray(f'{NVIS_SAVE_path}/NVIS7_0_AUST_PRE_MVS.nc')
 # Total vegataion area (ha) pre-1750
 NVIS_pre_mvg_total_ha = NVIS_pre_mvg_xr * zones['CELL_HA'].values[None, :]
 NVIS_pre_mvs_total_ha = NVIS_pre_mvs_xr * zones['CELL_HA'].values[None, :]
-NVIS_pre_mvg_total_ha_df = NVIS_pre_mvg_total_ha.sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA').reset_index()
-NVIS_pre_mvs_total_ha_df = NVIS_pre_mvs_total_ha.sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA').reset_index()
+NVIS_pre_mvg_total_ha_df = NVIS_pre_mvg_total_ha.sum(dim='cell').to_dataframe('ALL_HA').reset_index()
+NVIS_pre_mvs_total_ha_df = NVIS_pre_mvs_total_ha.sum(dim='cell').to_dataframe('ALL_HA').reset_index()
 
 
 # Vegataion area outside the LUTO study area
 NVIS_pre_mvg_outside_ha = NVIS_pre_mvg_xr.sel(cell=idx_out_LUTO_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_natural]
 NVIS_pre_mvs_outside_ha = NVIS_pre_mvs_xr.sel(cell=idx_out_LUTO_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_natural]
-NVIS_pre_mvg_outside_ha_df = NVIS_pre_mvg_outside_ha.sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA').reset_index()
-NVIS_pre_mvs_outside_ha_df = NVIS_pre_mvs_outside_ha.sum(dim='cell').to_dataframe('AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA').reset_index()
+NVIS_pre_mvg_outside_ha_df = NVIS_pre_mvg_outside_ha.sum(dim='cell').to_dataframe('NATURAL_OUT_LUTO_HA').reset_index()
+NVIS_pre_mvs_outside_ha_df = NVIS_pre_mvs_outside_ha.sum(dim='cell').to_dataframe('NATURAL_OUT_LUTO_HA').reset_index()
+
+# Vegetation area outside the LUTO study area (non-natural, permanently unrecoverable)
+NVIS_pre_mvg_non_natural_ha = NVIS_pre_mvg_xr.sel(cell=idx_out_LUTO_non_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_non_natural]
+NVIS_pre_mvs_non_natural_ha = NVIS_pre_mvs_xr.sel(cell=idx_out_LUTO_non_natural) * zones['CELL_HA'].values[None, idx_out_LUTO_non_natural]
+NVIS_pre_mvg_non_natural_ha_df = NVIS_pre_mvg_non_natural_ha.sum(dim='cell').to_dataframe('NON_NATURAL_OUT_LUTO_HA').reset_index()
+NVIS_pre_mvs_non_natural_ha_df = NVIS_pre_mvs_non_natural_ha.sum(dim='cell').to_dataframe('NON_NATURAL_OUT_LUTO_HA').reset_index()
 
 
 # Vegataion area inside the LUTO study area
 NVIS_pre_mvg_inside_ha = NVIS_pre_mvg_xr.sel(cell=idx_in_LUTO) * zones['CELL_HA'].values[None, idx_in_LUTO] * biodiv_degrade_ly[idx_in_LUTO]
 NVIS_pre_mvs_inside_ha = NVIS_pre_mvs_xr.sel(cell=idx_in_LUTO) * zones['CELL_HA'].values[None, idx_in_LUTO] * biodiv_degrade_ly[idx_in_LUTO]
-NVIS_pre_mvg_inside_ha_df = NVIS_pre_mvg_inside_ha.sum(dim='cell').to_dataframe('AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA').reset_index()
-NVIS_pre_mvs_inside_ha_df = NVIS_pre_mvs_inside_ha.sum(dim='cell').to_dataframe('AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA').reset_index()
+NVIS_pre_mvg_inside_ha_df = NVIS_pre_mvg_inside_ha.sum(dim='cell').to_dataframe('IN_LUTO_HA').reset_index()
+NVIS_pre_mvs_inside_ha_df = NVIS_pre_mvs_inside_ha.sum(dim='cell').to_dataframe('IN_LUTO_HA').reset_index()
 
 
 # Concatenate the dataframes
-NVIS_pre_mvg = NVIS_pre_mvg_total_ha_df.merge(NVIS_pre_mvg_outside_ha_df, on='group').merge(NVIS_pre_mvg_inside_ha_df, on='group')
-NVIS_pre_mvs = NVIS_pre_mvs_total_ha_df.merge(NVIS_pre_mvs_outside_ha_df, on='group').merge(NVIS_pre_mvs_inside_ha_df, on='group')
+NVIS_pre_mvg = NVIS_pre_mvg_total_ha_df.merge(NVIS_pre_mvg_outside_ha_df, on='group').merge(NVIS_pre_mvg_inside_ha_df, on='group').merge(NVIS_pre_mvg_non_natural_ha_df, on='group')
+NVIS_pre_mvs = NVIS_pre_mvs_total_ha_df.merge(NVIS_pre_mvs_outside_ha_df, on='group').merge(NVIS_pre_mvs_inside_ha_df, on='group').merge(NVIS_pre_mvs_non_natural_ha_df, on='group')
 
 
-# Calculate the percentage of base-year biodiversity socre to pre-1750 level of the base year
-NVIS_pre_mvg.insert(1, 'BASE_YR_PERCENT', NVIS_pre_mvg.eval(
-    '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
-    / AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA * 100'))
+# Calculate the attainable level and base-year biodiversity score relative to pre-1750
+NVIS_pre_mvg.insert(1, 'ATTAINABLE_LEVEL', NVIS_pre_mvg.eval('(1 - NON_NATURAL_OUT_LUTO_HA / ALL_HA) * 100'))
+NVIS_pre_mvg.insert(2, 'BASEYEAR_LEVEL', NVIS_pre_mvg.eval('(IN_LUTO_HA + NATURAL_OUT_LUTO_HA) / ALL_HA * 100'))
 
-NVIS_pre_mvs.insert(1, 'BASE_YR_PERCENT', NVIS_pre_mvs.eval(
-    '(AREA_WEIGHTED_AND_LANDUSE_DEGRADE_SCORE_INSIDE_LUTO_HA + AREA_WEIGHTED_SCORE_OUTSIDE_LUTO_NATURAL_HA) \
-    / AREA_WEIGHTED_SCORE_ALL_AUSTRALIA_HA * 100'))
+NVIS_pre_mvs.insert(1, 'ATTAINABLE_LEVEL', NVIS_pre_mvs.eval('(1 - NON_NATURAL_OUT_LUTO_HA / ALL_HA) * 100'))
+NVIS_pre_mvs.insert(2, 'BASEYEAR_LEVEL', NVIS_pre_mvs.eval('(IN_LUTO_HA + NATURAL_OUT_LUTO_HA) / ALL_HA * 100'))
 
 
 # Append a user-defined target column
-NVIS_pre_mvg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', 50)
-NVIS_pre_mvg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', 50)
-NVIS_pre_mvg.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', 30)
+NVIS_pre_mvg.insert(3, 'TARGET_LEVEL_2100', 50)
+NVIS_pre_mvg.insert(3, 'TARGET_LEVEL_2050', 50)
+NVIS_pre_mvg.insert(3, 'TARGET_LEVEL_2030', 30)
 
-NVIS_pre_mvs.insert(2, 'USER_DEFINED_TARGET_PERCENT_2100', 50)
-NVIS_pre_mvs.insert(2, 'USER_DEFINED_TARGET_PERCENT_2050', 50)
-NVIS_pre_mvs.insert(2, 'USER_DEFINED_TARGET_PERCENT_2030', 30)
+NVIS_pre_mvs.insert(3, 'TARGET_LEVEL_2100', 50)
+NVIS_pre_mvs.insert(3, 'TARGET_LEVEL_2050', 50)
+NVIS_pre_mvs.insert(3, 'TARGET_LEVEL_2030', 30)
 
 # Combine all CSVs and save them to Excel
 csv_files = {
