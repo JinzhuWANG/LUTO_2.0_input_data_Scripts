@@ -1,4 +1,4 @@
-# 4_assemble_biophysical_data.py
+# script_4_assemble_biophysical_data.py
 
 ## Purpose
 

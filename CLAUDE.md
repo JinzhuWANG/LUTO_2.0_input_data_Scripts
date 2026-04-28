@@ -14,16 +14,17 @@ Scripts must be run in order. Later scripts depend on outputs from earlier ones.
 
 | Script | Topic | Key output |
 |---|---|---|
-| `1_assemble_zones_data.py` | Spatial framework | `cell_zones_df.h5` |
-| `2_assemble_agricultural_data.py` | Agricultural economics | `cell_LU_mapping.h5`, SA2 ag data HDF5s |
-| `3_agriculture_climate_damage.py` | Climate yield damage | `SA2_climate_damage_mult.h5` |
-| `4_assemble_biophysical_data.py` | Biophysical variables | `cell_biophysical_df.h5` |
-| `5_1_assemble_biodiversity_data.py` | Biodiversity scores (national) | NVIS `.nc`, SNES/ECNES `.nc` + target CSVs |
-| `5_2_get_NVIS_SNES_ECNES_targets_by_regions.py` | Biodiversity scores (regional) | NRM/IBRA target Excel/CSV files |
-| `6_water_yield_modelling.py` | Water yield | Appended into `cell_biophysical_df.h5` |
-| `7_assemble_additional_land_use_sieve_data.py` | Land use constraints | `cell_lu_sieve_df.pkl` |
-| `8_assemble_ag_yield_gap_data.py` | Yield gap | `SA2_yield_gap_mult.h5` |
-| `9_reforestation_carbon_data.py` | Carbon sequestration | `tCO2_ha_*.nc` NetCDF files |
+| `script_1_assemble_zones_data.py` | Spatial framework | `cell_zones_df.h5` |
+| `script_2_assemble_agricultural_data.py` | Agricultural economics | `cell_LU_mapping.h5`, SA2 ag data HDF5s |
+| `script_3_agriculture_climate_damage.py` | Climate yield damage | `SA2_climate_damage_mult.h5` |
+| `script_4_assemble_biophysical_data.py` | Biophysical variables | `cell_biophysical_df.h5` |
+| `script_5_0_SNES_ECNES_selected.py` | SNES/ECNES target species lists | imported by script 5_2 |
+| `script_5_1_assemble_biodiversity_data.py` | Biodiversity scores (national) | NVIS `.nc`, SNES/ECNES `.nc` + target CSVs |
+| `script_5_2_get_NVIS_SNES_ECNES_targets_by_regions.py` | Biodiversity scores (regional) | NRM/IBRA target Excel/CSV files |
+| `script_6_water_yield_modelling.py` | Water yield | Appended into `cell_biophysical_df.h5` |
+| `script_7_assemble_additional_land_use_sieve_data.py` | Land use constraints | `cell_lu_sieve_df.pkl` |
+| `script_8_assemble_ag_yield_gap_data.py` | Yield gap | `SA2_yield_gap_mult.h5` |
+| `script_9_reforestation_carbon_data.py` | Carbon sequestration | `tCO2_ha_*.nc` NetCDF files |
 
 ## Spatial Framework
 

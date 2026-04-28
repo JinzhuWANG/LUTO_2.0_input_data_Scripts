@@ -1,4 +1,4 @@
-# 5_2_get_NVIS_SNES_ECNES_targets_by_regions.py
+# script_5_2_get_NVIS_SNES_ECNES_targets_by_regions.py
 
 ## Purpose
 

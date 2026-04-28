@@ -1,4 +1,4 @@
-# 6_water_yield_modelling.py
+# script_6_water_yield_modelling.py
 
 ## Purpose
 

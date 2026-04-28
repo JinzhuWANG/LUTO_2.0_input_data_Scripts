@@ -1,4 +1,4 @@
-# 5_1_assemble_biodiversity_data.py
+# script_5_1_assemble_biodiversity_data.py
 
 ## Purpose
 
