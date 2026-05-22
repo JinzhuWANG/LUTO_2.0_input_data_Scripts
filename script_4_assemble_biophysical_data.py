@@ -801,7 +801,14 @@ HCAS_LUMAP_PERCENTILE_df = pd.DataFrame(HCAS_lumap_percentile).T
 HCAS_LUMAP_PERCENTILE_df.index.name = 'lu'
 HCAS_LUMAP_PERCENTILE_df.columns = percentiles
 HCAS_LUMAP_PERCENTILE_df.columns = ['PERCENTILE_' + str(i) for i in HCAS_LUMAP_PERCENTILE_df.columns]
-HCAS_LUMAP_PERCENTILE_df['USER_DEFINED'] = None
+
+# Add a custom column which is the default LUTO biodiversity habitat contribution 
+_norm = HCAS_LUMAP_PERCENTILE_df.loc[23, 'PERCENTILE_50']
+HCAS_LUMAP_PERCENTILE_df['USER_DEFINED'] = HCAS_LUMAP_PERCENTILE_df['PERCENTILE_50'] / _norm
+_overrides = {2: 0.7, 6: 0.7, 15: 0.7}  
+for _lu, _val in _overrides.items():
+    if _lu in HCAS_LUMAP_PERCENTILE_df.index:
+        HCAS_LUMAP_PERCENTILE_df.loc[_lu, 'USER_DEFINED'] = _val
 
 if os.path.exists(f"{HCAS_path}/Processed/HABITAT_CONDITION.csv"):
     os.remove(f"{HCAS_path}/Processed/HABITAT_CONDITION.csv")
