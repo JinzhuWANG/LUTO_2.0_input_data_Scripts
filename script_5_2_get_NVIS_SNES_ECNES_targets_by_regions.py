@@ -42,7 +42,7 @@ from script_5_0_SNES_ECNES_selected import NECMA_SNES, GBCMA_SNES, NECMA_ECNES, 
 #                                  Global variables                                           #
 ###############################################################################################
 
-N_JOBS = 32 # number of parallel workers
+N_JOBS = 8 # number of parallel workers
 
 
 
@@ -145,6 +145,24 @@ region_array = {
     'IBRA_SUB':  region_IBRA_SUB_2D.values,
 }
 
+# Pre-factorize region labels to int codes — pandas int groupby uses np.bincount
+# (no hash map), ~4.5x faster than string groupby. region_int_uniq maps code -> name.
+region_int_uniq = {}
+region_int_2D   = {}
+for _reg, _labels_1d in [
+    ('AUSTRALIA', region_Aus),
+    ('NRM',       region_NRM),
+    ('STATE',     region_STATE),
+    ('IBRA_REG',  region_IBRA_REG),
+    ('IBRA_SUB',  region_IBRA_SUB),
+]:
+    _codes, _uniq = pd.factorize(_labels_1d, sort=True)
+    region_int_uniq[_reg] = _uniq
+    _arr2d = np.zeros(NLUM.shape, dtype=np.int32)
+    np.place(_arr2d, NLUM.values, _codes.astype(np.int32))
+    region_int_2D[_reg] = _arr2d
+
+
 # Cell-area weights for each score partition (1D, length = n_cells)
 # float64 required: float32 groupby accumulation causes ~0.1% error on large groups
 # (e.g. 130k ha error on 137M ha Hummock Grasslands). SNES/ECNES species arrays
@@ -188,26 +206,27 @@ def get_resfactored_average_fraction(arr: np.ndarray, resfactor: int, mask_2d: n
     return arr_2d_fullres[mask_2d]
 
 def compute_region_scores(
-    arr: xr.DataArray, 
-    area: np.ndarray, 
-    in_degrade: np.ndarray, 
-    out_idx_nat: np.ndarray, 
-    out_idx_non_nat: np.ndarray, 
-    region_labels: np.ndarray
-    ) -> pd.DataFrame:
+    arr: np.ndarray,
+    area: np.ndarray,
+    in_degrade: np.ndarray,
+    out_idx_nat: np.ndarray,
+    out_idx_non_nat: np.ndarray,
+    region_labels: pd.Categorical,
+) -> pd.DataFrame:
     """
-    Assign region as a non-dimension coordinate on 'cell', then groupby-sum to get
-    the four score components per region. Works on any DataArray with a 'cell' dimension.
+    Weighted-area groupby for a single 1D species array.
+    region_labels is a pd.Categorical — int codes drive fast np.bincount groupby,
+    string labels come from .categories automatically.
     """
-    arr = arr.assign_coords({'region': ('cell', region_labels)})
-    arr_df =  xr.Dataset({
-        'ALL_HA':                  (arr * area * 1                ).groupby('region').sum('cell'),
-        'IN_LUTO_HA':              (arr * area * in_degrade       ).groupby('region').sum('cell'),
-        'NATURAL_OUT_LUTO_HA':     (arr * area * out_idx_nat      ).groupby('region').sum('cell'),
-        'NON_NATURAL_OUT_LUTO_HA': (arr * area * out_idx_non_nat  ).groupby('region').sum('cell'),
-    }).compute().to_dataframe()
-    
-    return arr_df.query('ALL_HA > 0').reset_index()  # only keep regions with >0 ha in the input array
+    arr_area = arr * area
+    df = pd.DataFrame({
+        'region':             region_labels,
+        'ALL_HA':             arr_area,
+        'IN_LUTO_HA':         arr_area * in_degrade,
+        'NATURAL_OUT_LUTO_HA':     arr_area * out_idx_nat,
+        'NON_NATURAL_OUT_LUTO_HA': arr_area * out_idx_non_nat,
+    })
+    return df.groupby('region', sort=True, observed=True).sum().query('ALL_HA > 0').reset_index()
 
 
 def add_derived_cols(df: pd.DataFrame) -> pd.DataFrame:
@@ -248,15 +267,30 @@ rename_likely_maybe = {
 _DROP_INTERNAL = ['NON_NATURAL_OUT_LUTO_HA', 'BASEYEAR_SCORE']
 
 
+###############################################################################################
+#   Pre-compute masks and RF-level weight arrays (shared by all datasets)                     #
+#   10 RF values × 5 region levels — done once here, never recomputed inside tasks            #
+###############################################################################################
 
+masks = {rf: get_2D_mask(rf) for rf in RESFACTORS}
 
+rf_meta = {
+    rf: dict(
+        area          = get_resfactored_average_fraction(cell_ha.astype(np.float32),                     rf, masks[rf]) * rf**2,
+        in_degrade    = get_resfactored_average_fraction((biodiv_degrade_ly * idx_in_LUTO).astype(np.float32), rf, masks[rf]),
+        out_idx_nat   = get_resfactored_average_fraction(idx_out_LUTO_natural.astype(np.float32),         rf, masks[rf]),
+        out_idx_non_nat = get_resfactored_average_fraction(idx_out_LUTO_non_natural.astype(np.float32),   rf, masks[rf]),
+        region_labels = {reg: pd.Categorical.from_codes(region_int_2D[reg][masks[rf]], region_int_uniq[reg]) for reg in region_array},
+    )
+    for rf in RESFACTORS
+}
 
 
 
 ###############################################################################################
 #        NVIS — Pre-1750 MVG and MVS weighted area by all region levels  (GBF3)               #
 ###############################################################################################
-NVIS_df = pd.DataFrame()  # placeholder for consolidated output; rows appended in loop below
+NVIS_df = pd.DataFrame()
 
 tasks = []
 for sheet_name, nc_path in [
@@ -264,27 +298,21 @@ for sheet_name, nc_path in [
     ('NVIS_MVS', f'{NVIS_SAVE_path}/NVIS7_0_AUST_PRE_MVS.nc'),
 ]:
     xr_pre = xr.load_dataarray(nc_path).astype(np.float32) / 100   # (group, cell), fraction [0-1]
-    xr_pre = xr_pre.chunk({'group': 1, 'cell': -1})  # chunk by group for parallel processing; cell dimension must be unchunked for groupby in compute_region_scores
     for species in xr_pre.coords['group'].values:
-        for reg, reg_arr in region_array.items():
-            for resfactor in RESFACTORS:
-                
-                def wrapper(species=species, reg=reg, reg_arr=reg_arr, resfactor=resfactor, sheet_name=sheet_name, xr_pre=xr_pre) -> pd.DataFrame:
-                    mask_2d         = get_2D_mask(resfactor)
-                    arr             = xr.DataArray(get_resfactored_average_fraction(xr_pre.sel(group=species).values, resfactor, mask_2d), dims=['cell'])
-                    area            = get_resfactored_average_fraction(cell_ha, resfactor, mask_2d) * resfactor**2
-                    in_degrade      = get_resfactored_average_fraction((biodiv_degrade_ly * idx_in_LUTO).astype(np.float32), resfactor, mask_2d)
-                    out_idx_nat     = get_resfactored_average_fraction(idx_out_LUTO_natural.astype(np.float32), resfactor, mask_2d)
-                    out_idx_non_nat = get_resfactored_average_fraction(idx_out_LUTO_non_natural.astype(np.float32), resfactor, mask_2d)
-                    region_labels   = reg_arr[mask_2d]
+        species_arr = xr_pre.sel(group=species).values  # extract numpy once per species — no dask inside threads
+        for rf in RESFACTORS:
+            def wrapper(species=species, rf=rf, sheet_name=sheet_name, species_arr=species_arr) -> pd.DataFrame:
+                meta = rf_meta[rf]
+                arr  = get_resfactored_average_fraction(species_arr, rf, masks[rf])  # computed once, reused for all regions
+                rows = [
+                    add_derived_cols(compute_region_scores(arr, meta['area'], meta['in_degrade'], meta['out_idx_nat'], meta['out_idx_non_nat'], meta['region_labels'][reg]))
+                    .assign(species=species, region_level=reg, resfactor=rf, sheet_name=sheet_name)
+                    for reg in region_array
+                ]
+                return pd.concat(rows, ignore_index=True)
+            tasks.append(delayed(wrapper)())
 
-                    df = compute_region_scores(arr, area, in_degrade, out_idx_nat, out_idx_non_nat, region_labels)
-                    return add_derived_cols(df).assign(species=species, region_level=reg, resfactor=resfactor, sheet_name=sheet_name)
-                
-                tasks.append(delayed(wrapper)())
-
-# Get df and save to disk        
-for df in tqdm(Parallel(n_jobs=N_JOBS, return_as='generator_unordered')(tasks), total=len(tasks)):
+for df in tqdm(Parallel(n_jobs=N_JOBS, prefer='threads', return_as='generator_unordered')(tasks), total=len(tasks)):
     NVIS_df = pd.concat([NVIS_df, df], ignore_index=True)
 
 NVIS_df.to_csv(f'{NVIS_SAVE_path}/BIODIVERSITY_GBF3_NVIS_SCORES_AND_TARGETS.csv', index=False)             
@@ -327,59 +355,51 @@ ECNES_meta_att = (
 
 ###############################################################################################
 #         SNES — weighted area by presence × region × resfactor  (GBF4)                      #
+#   parallel: resfactor + groupby per (presence, species, region, RF)                        #
 ###############################################################################################
 
 snes_tasks = []
-for presence, arr in [('LIKELY', SNES_likely_arr), ('MAYBE', SNES_lm_arr)]:
-    for reg, reg_arr in region_array.items():
-        for resfactor in RESFACTORS:
-            def wrapper(presence=presence, arr=arr, reg=reg, reg_arr=reg_arr, resfactor=resfactor) -> pd.DataFrame:
-                mask_2d         = get_2D_mask(resfactor)
-                arr_c           = arr.compute()
-                species_list    = arr_c.coords['species'].values
-                rf_vals         = np.stack([get_resfactored_average_fraction(arr_c.sel(species=sp).values, resfactor, mask_2d) for sp in species_list])
-                arr_rf          = xr.DataArray(rf_vals, dims=['species', 'cell'], coords={'species': species_list})
-                area            = get_resfactored_average_fraction(cell_ha, resfactor, mask_2d) * resfactor**2
-                in_degrade      = get_resfactored_average_fraction((biodiv_degrade_ly * idx_in_LUTO).astype(np.float32), resfactor, mask_2d)
-                out_idx_nat     = get_resfactored_average_fraction(idx_out_LUTO_natural.astype(np.float32), resfactor, mask_2d)
-                out_idx_non_nat = get_resfactored_average_fraction(idx_out_LUTO_non_natural.astype(np.float32), resfactor, mask_2d)
-                region_labels   = reg_arr[mask_2d]
-                df = compute_region_scores(arr_rf, area, in_degrade, out_idx_nat, out_idx_non_nat, region_labels)
-                return add_derived_cols(df).assign(presence=presence, region_level=reg, resfactor=resfactor)
-            snes_tasks.append(delayed(wrapper)())
+for presence, arr_xr in [('LIKELY', SNES_likely_arr), ('MAYBE', SNES_lm_arr)]:
+    arr_c = arr_xr.compute()
+    for species in arr_c.coords['species'].values:
+        species_arr = arr_c.sel(species=species).values
+        for reg in region_array:
+            for rf in RESFACTORS:
+                def wrapper(presence=presence, species=species, reg=reg, rf=rf, species_arr=species_arr) -> pd.DataFrame:
+                    meta = rf_meta[rf]
+                    arr  = get_resfactored_average_fraction(species_arr, rf, masks[rf])
+                    df   = compute_region_scores(arr, meta['area'], meta['in_degrade'], meta['out_idx_nat'], meta['out_idx_non_nat'], meta['region_labels'][reg])
+                    return add_derived_cols(df).assign(presence=presence, species=species, region_level=reg, resfactor=rf)
+                snes_tasks.append(delayed(wrapper)())
 
 snes_raw = pd.DataFrame()
-for df in tqdm(Parallel(n_jobs=N_JOBS, return_as='generator_unordered')(snes_tasks), total=len(snes_tasks)):
+for df in tqdm(Parallel(n_jobs=N_JOBS, prefer='threads', return_as='generator_unordered')(snes_tasks), total=len(snes_tasks)):
     snes_raw = pd.concat([snes_raw, df], ignore_index=True)
 
 
 
 
 ###############################################################################################
-#         ECNES — weighted area by presence × region × resfactor  (GBF4)                     #
+#         ECNES — weighted area by presence × species × region × resfactor  (GBF4)           #
+#   parallel: resfactor + groupby per (presence, species, region, RF)                        #
 ###############################################################################################
 
 ecnes_tasks = []
-for presence, arr in [('LIKELY', ECNES_likely_arr), ('MAYBE', ECNES_lm_arr)]:
-    for reg, reg_arr in region_array.items():
-        for resfactor in RESFACTORS:
-            def wrapper(presence=presence, arr=arr, reg=reg, reg_arr=reg_arr, resfactor=resfactor) -> pd.DataFrame:
-                mask_2d         = get_2D_mask(resfactor)
-                arr_c           = arr.compute()
-                species_list    = arr_c.coords['species'].values
-                rf_vals         = np.stack([get_resfactored_average_fraction(arr_c.sel(species=sp).values, resfactor, mask_2d) for sp in species_list])
-                arr_rf          = xr.DataArray(rf_vals, dims=['species', 'cell'], coords={'species': species_list})
-                area            = get_resfactored_average_fraction(cell_ha, resfactor, mask_2d) * resfactor**2
-                in_degrade      = get_resfactored_average_fraction((biodiv_degrade_ly * idx_in_LUTO).astype(np.float32), resfactor, mask_2d)
-                out_idx_nat     = get_resfactored_average_fraction(idx_out_LUTO_natural.astype(np.float32), resfactor, mask_2d)
-                out_idx_non_nat = get_resfactored_average_fraction(idx_out_LUTO_non_natural.astype(np.float32), resfactor, mask_2d)
-                region_labels   = reg_arr[mask_2d]
-                df = compute_region_scores(arr_rf, area, in_degrade, out_idx_nat, out_idx_non_nat, region_labels)
-                return add_derived_cols(df).assign(presence=presence, region_level=reg, resfactor=resfactor)
-            ecnes_tasks.append(delayed(wrapper)())
+for presence, arr_xr in [('LIKELY', ECNES_likely_arr), ('MAYBE', ECNES_lm_arr)]:
+    arr_c = arr_xr.compute()
+    for species in arr_c.coords['species'].values:
+        species_arr = arr_c.sel(species=species).values
+        for reg in region_array:
+            for rf in RESFACTORS:
+                def wrapper(presence=presence, species=species, reg=reg, rf=rf, species_arr=species_arr) -> pd.DataFrame:
+                    meta = rf_meta[rf]
+                    arr  = get_resfactored_average_fraction(species_arr, rf, masks[rf])
+                    df   = compute_region_scores(arr, meta['area'], meta['in_degrade'], meta['out_idx_nat'], meta['out_idx_non_nat'], meta['region_labels'][reg])
+                    return add_derived_cols(df).assign(presence=presence, species=species, region_level=reg, resfactor=rf)
+                ecnes_tasks.append(delayed(wrapper)())
 
 ecnes_raw = pd.DataFrame()
-for df in tqdm(Parallel(n_jobs=N_JOBS, return_as='generator_unordered')(ecnes_tasks), total=len(ecnes_tasks)):
+for df in tqdm(Parallel(n_jobs=N_JOBS, prefer='threads', return_as='generator_unordered')(ecnes_tasks), total=len(ecnes_tasks)):
     ecnes_raw = pd.concat([ecnes_raw, df], ignore_index=True)
 
 
