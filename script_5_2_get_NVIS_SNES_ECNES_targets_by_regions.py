@@ -11,9 +11,9 @@ Region levels:
   IBRA_SUB   — IBRA biogeographic subregions (NVIS only)
 
 Outputs:
-  BIODIVERSITY_GBF3_NVIS_SCORES_AND_TARGETS.csv          — NVIS MVG + MVS, all regions × resfactors
-  bio_DCCEEW_SNES_target_ALL_REGIONS.csv                  — SNES LIKELY + MAYBE merged, all regions × resfactors
-  bio_DCCEEW_ECNES_target_ALL_REGIONS.csv                 — ECNES LIKELY + MAYBE merged, all regions × resfactors
+  BIODIVERSITY_GBF3_NVIS_SCORES_AND_TARGETS.csv  — NVIS MVG + MVS, all regions × resfactors
+  bio_DCCEEW_SNES_target_ALL_REGIONS.csv         — SNES long format (presence column), all regions × resfactors
+  bio_DCCEEW_ECNES_target_ALL_REGIONS.csv        — ECNES long format (presence column), all regions × resfactors
 
 Score columns (per dataset):
   ALL_HA               — total weighted habitat area in region
@@ -220,11 +220,11 @@ def compute_region_scores(
     """
     arr_area = arr * area
     df = pd.DataFrame({
-        'region':             region_labels,
-        'ALL_HA':             arr_area,
-        'IN_LUTO_HA':         arr_area * in_degrade,
-        'NATURAL_OUT_LUTO_HA':     arr_area * out_idx_nat,
-        'NON_NATURAL_OUT_LUTO_HA': arr_area * out_idx_non_nat,
+        'region':                   region_labels,
+        'ALL_HA':                   arr_area,
+        'IN_LUTO_HA':               arr_area * in_degrade,
+        'NATURAL_OUT_LUTO_HA':      arr_area * out_idx_nat,
+        'NON_NATURAL_OUT_LUTO_HA':  arr_area * out_idx_non_nat,
     })
     return df.groupby('region', sort=True, observed=True).sum().query('ALL_HA > 0').reset_index()
 
@@ -240,31 +240,6 @@ def add_derived_cols(df: pd.DataFrame) -> pd.DataFrame:
     return df[df['ALL_HA'] > 0].reset_index(drop=True)
 
 
-
-rename_likely = {
-    'ATTAINABLE_LEVEL':    'ATTAINABLE_LEVEL_LIKELY',
-    'BASEYEAR_LEVEL':      'BASEYEAR_LEVEL_LIKELY',
-    'TARGET_LEVEL_2030':   'TARGET_LEVEL_2030_LIKELY',
-    'TARGET_LEVEL_2050':   'TARGET_LEVEL_2050_LIKELY',
-    'TARGET_LEVEL_2100':   'TARGET_LEVEL_2100_LIKELY',
-    'ALL_HA':              'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY',
-    'IN_LUTO_HA':          'BASEYEAR_SCORE_INSIDE_LUTO_NATURAL_LIKELY',
-    'NATURAL_OUT_LUTO_HA': 'BASEYEAR_SCORE_OUT_LUTO_NATURAL_LIKELY',
-}
-
-rename_likely_maybe = {
-    'ATTAINABLE_LEVEL':    'ATTAINABLE_LEVEL_LIKELY_MAYBE',
-    'BASEYEAR_LEVEL':      'BASEYEAR_LEVEL_LIKELY_MAYBE',
-    'TARGET_LEVEL_2030':   'TARGET_LEVEL_2030_LIKELY_MAYBE',
-    'TARGET_LEVEL_2050':   'TARGET_LEVEL_2050_LIKELY_MAYBE',
-    'TARGET_LEVEL_2100':   'TARGET_LEVEL_2100_LIKELY_MAYBE',
-    'ALL_HA':              'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY_MAYBE',
-    'IN_LUTO_HA':          'BASEYEAR_SCORE_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
-    'NATURAL_OUT_LUTO_HA': 'BASEYEAR_SCORE_OUT_LUTO_NATURAL_LIKELY_MAYBE',
-}
-
-# Internal columns not needed in final outputs — drop before merging LIKELY + LIKELY_MAYBE
-_DROP_INTERNAL = ['NON_NATURAL_OUT_LUTO_HA', 'BASEYEAR_SCORE']
 
 
 ###############################################################################################
@@ -406,79 +381,63 @@ for df in tqdm(Parallel(n_jobs=N_JOBS, prefer='threads', return_as='generator_un
 
 
 ###############################################################################################
-#          Assemble: merge LIKELY + MAYBE, join metadata, apply targets, save                 #
+#          Assemble: join metadata, apply targets, save (long format — presence column)       #
 ###############################################################################################
 
 '''
 NRM targets: from NECMA/GBCMA contract with Deakin — >=50% by 2030, >=70% by 2050/2100
-             in the specific NRM region where each species is listed.
+             in the specific NRM region where each species is listed. Applied to both presences.
 Australia targets: same thresholds applied nationally for species in SNES_AUSTRALIA / ECNES_AUSTRALIA.
-NECMA only specify LIKELY targets; same values applied to LIKELY_MAYBE to be precautionary.
+             Applied to LIKELY only (MAYBE has no contractual obligation at national scale).
 '''
 
-def assemble_species_df(raw: pd.DataFrame, name_col: str, meta_att: pd.DataFrame) -> pd.DataFrame:
-    merge_on = [name_col, 'region', 'region_level', 'resfactor']
-    likely = (raw[raw['presence'] == 'LIKELY']
-              .drop(columns=['presence'] + _DROP_INTERNAL)
-              .rename(columns={'species': name_col, **rename_likely}))
-    maybe  = (raw[raw['presence'] == 'MAYBE']
-              .drop(columns=['presence'] + _DROP_INTERNAL)
-              .rename(columns={'species': name_col, **rename_likely_maybe}))
-    return likely.merge(maybe, on=merge_on, how='outer').merge(meta_att, on=name_col, how='left')
+def assemble_df(raw: pd.DataFrame, name_col: str, meta_att: pd.DataFrame) -> pd.DataFrame:
+    return (raw
+        .drop(columns=['NON_NATURAL_OUT_LUTO_HA', 'BASEYEAR_SCORE'])
+        .rename(columns={'species': name_col})
+        .merge(meta_att, on=name_col, how='left')
+    )
 
-snes_all  = assemble_species_df(snes_raw,  'SCIENTIFIC_NAME', SNES_meta_att)
-ecnes_all = assemble_species_df(ecnes_raw, 'COMMUNITY',       ECNES_meta_att)
+snes_all  = assemble_df(snes_raw,  'SCIENTIFIC_NAME', SNES_meta_att)
+ecnes_all = assemble_df(ecnes_raw, 'COMMUNITY',       ECNES_meta_att)
 
-# NRM region targets
+# NRM region targets (both LIKELY and MAYBE)
 for df, key_col, region_lists in [
     (snes_all,  'SCIENTIFIC_NAME', [('North East', NECMA_SNES),  ('Goulburn Broken', GBCMA_SNES)]),
     (ecnes_all, 'COMMUNITY',       [('North East', NECMA_ECNES), ('Goulburn Broken', GBCMA_ECNES)]),
 ]:
     for region, species_list in region_lists:
         mask = (df['region_level'] == 'NRM') & (df['region'] == region) & (df[key_col].isin(species_list))
-        df.loc[mask, 'TARGET_LEVEL_2030_LIKELY']       = 50
-        df.loc[mask, 'TARGET_LEVEL_2050_LIKELY']       = 70
-        df.loc[mask, 'TARGET_LEVEL_2100_LIKELY']       = 70
-        df.loc[mask, 'TARGET_LEVEL_2030_LIKELY_MAYBE'] = 50
-        df.loc[mask, 'TARGET_LEVEL_2050_LIKELY_MAYBE'] = 70
-        df.loc[mask, 'TARGET_LEVEL_2100_LIKELY_MAYBE'] = 70
+        df.loc[mask, 'TARGET_LEVEL_2030'] = 50
+        df.loc[mask, 'TARGET_LEVEL_2050'] = 70
+        df.loc[mask, 'TARGET_LEVEL_2100'] = 70
 
-# Australia-wide targets
-mask = (snes_all['region_level'] == 'AUSTRALIA') & snes_all['SCIENTIFIC_NAME'].isin(SNES_AUSTRALIA)
-snes_all.loc[mask, 'TARGET_LEVEL_2030_LIKELY'] = 50
-snes_all.loc[mask, 'TARGET_LEVEL_2050_LIKELY'] = 70
-snes_all.loc[mask, 'TARGET_LEVEL_2100_LIKELY'] = 70
+# Australia-wide targets (LIKELY only)
+mask = (snes_all['region_level'] == 'AUSTRALIA') & snes_all['SCIENTIFIC_NAME'].isin(SNES_AUSTRALIA) & (snes_all['presence'] == 'LIKELY')
+snes_all.loc[mask, 'TARGET_LEVEL_2030'] = 50
+snes_all.loc[mask, 'TARGET_LEVEL_2050'] = 70
+snes_all.loc[mask, 'TARGET_LEVEL_2100'] = 70
 
-mask = (ecnes_all['region_level'] == 'AUSTRALIA') & ecnes_all['COMMUNITY'].isin(ECNES_AUSTRALIA)
-ecnes_all.loc[mask, 'TARGET_LEVEL_2030_LIKELY'] = 50
-ecnes_all.loc[mask, 'TARGET_LEVEL_2050_LIKELY'] = 70
-ecnes_all.loc[mask, 'TARGET_LEVEL_2100_LIKELY'] = 70
+mask = (ecnes_all['region_level'] == 'AUSTRALIA') & ecnes_all['COMMUNITY'].isin(ECNES_AUSTRALIA) & (ecnes_all['presence'] == 'LIKELY')
+ecnes_all.loc[mask, 'TARGET_LEVEL_2030'] = 50
+ecnes_all.loc[mask, 'TARGET_LEVEL_2050'] = 70
+ecnes_all.loc[mask, 'TARGET_LEVEL_2100'] = 70
 
 snes_cols = [
-    'SCIENTIFIC_NAME', 'region_level', 'region', 'resfactor',
-    'ATTAINABLE_LEVEL_LIKELY', 'BASEYEAR_LEVEL_LIKELY',
-    'TARGET_LEVEL_2030_LIKELY', 'TARGET_LEVEL_2050_LIKELY', 'TARGET_LEVEL_2100_LIKELY',
-    'ATTAINABLE_LEVEL_LIKELY_MAYBE', 'BASEYEAR_LEVEL_LIKELY_MAYBE',
-    'TARGET_LEVEL_2030_LIKELY_MAYBE', 'TARGET_LEVEL_2050_LIKELY_MAYBE', 'TARGET_LEVEL_2100_LIKELY_MAYBE',
-    'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY',
-    'BASEYEAR_SCORE_OUT_LUTO_NATURAL_LIKELY', 'BASEYEAR_SCORE_INSIDE_LUTO_NATURAL_LIKELY',
-    'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY_MAYBE',
-    'BASEYEAR_SCORE_OUT_LUTO_NATURAL_LIKELY_MAYBE', 'BASEYEAR_SCORE_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
+    'SCIENTIFIC_NAME', 'presence', 'region_level', 'region', 'resfactor',
+    'ATTAINABLE_LEVEL', 'BASEYEAR_LEVEL',
+    'TARGET_LEVEL_2030', 'TARGET_LEVEL_2050', 'TARGET_LEVEL_2100',
+    'ALL_HA', 'IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA',
     'LISTED_TAXON_ID', 'MAP_TAXON_ID', 'VERNACULAR_NAME', 'THREATENED_STATUS',
     'MIGRATORY_STATUS', 'MARINE', 'CETACEAN', 'EXTRACT_DATE', 'TAXON_GROUP',
     'TAXON_FAMILY', 'TAXON_ORDER', 'TAXON_CLASS', 'TAXON_PHYLUM',
     'TAXON_KINGDOM', 'OTHER_IDS', 'CELL_SIZE', 'REGIONS', 'ATTRIBUTION', 'SPRAT_PROFILE',
 ]
 ecnes_cols = [
-    'COMMUNITY', 'region_level', 'region', 'resfactor',
-    'ATTAINABLE_LEVEL_LIKELY', 'BASEYEAR_LEVEL_LIKELY',
-    'TARGET_LEVEL_2030_LIKELY', 'TARGET_LEVEL_2050_LIKELY', 'TARGET_LEVEL_2100_LIKELY',
-    'ATTAINABLE_LEVEL_LIKELY_MAYBE', 'BASEYEAR_LEVEL_LIKELY_MAYBE',
-    'TARGET_LEVEL_2030_LIKELY_MAYBE', 'TARGET_LEVEL_2050_LIKELY_MAYBE', 'TARGET_LEVEL_2100_LIKELY_MAYBE',
-    'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY',
-    'BASEYEAR_SCORE_OUT_LUTO_NATURAL_LIKELY', 'BASEYEAR_SCORE_INSIDE_LUTO_NATURAL_LIKELY',
-    'BASELINE_LEVEL_ALL_AUSTRALIA_LIKELY_MAYBE',
-    'BASEYEAR_SCORE_OUT_LUTO_NATURAL_LIKELY_MAYBE', 'BASEYEAR_SCORE_INSIDE_LUTO_NATURAL_LIKELY_MAYBE',
+    'COMMUNITY', 'presence', 'region_level', 'region', 'resfactor',
+    'ATTAINABLE_LEVEL', 'BASEYEAR_LEVEL',
+    'TARGET_LEVEL_2030', 'TARGET_LEVEL_2050', 'TARGET_LEVEL_2100',
+    'ALL_HA', 'IN_LUTO_HA', 'NATURAL_OUT_LUTO_HA',
     'CATEGORY', 'COM_ID', 'EPBC', 'EXTRACTED', 'CELL_SIZE', 'REGIONS', 'CITATION', 'SPRAT',
 ]
 
