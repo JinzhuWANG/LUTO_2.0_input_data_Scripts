@@ -43,10 +43,8 @@ from script_5_0_SNES_ECNES_selected import NECMA_SNES, GBCMA_SNES, NECMA_ECNES, 
 ###############################################################################################
 
 N_JOBS = 8 # number of parallel workers
-
-
-
 Unalloc_nat_code = 23
+
 HCAS_condition  = 'N:/Data-Master/Habitat_condition_assessment_system/Data/Processed/HABITAT_CONDITION.csv'
 SNES_ECNES_dir  = 'N:/Data-Master/Biodiversity/DCCEEW/SNES_ECNES'
 NVIS_SAVE_path  = 'N:/Data-Master/NVIS/Processed'
@@ -301,14 +299,16 @@ NVIS_df.to_csv(f'{NVIS_SAVE_path}/BIODIVERSITY_GBF3_NVIS_SCORES_AND_TARGETS.csv'
 SNES_raw = xr.open_dataarray(
     f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES.nc', chunks={'species': 50, 'presence': 1}
 )
-SNES_likely_arr = SNES_raw.sel(presence='LIKELY').astype(np.float32)
-SNES_lm_arr     = SNES_raw.sel(presence='MAYBE').astype(np.float32)
+SNES_likely_arr         = SNES_raw.sel(presence='LIKELY').astype(np.float32)
+SNES_maybe_arr          = SNES_raw.sel(presence='MAYBE').astype(np.float32)
+SNES_likely_and_maybe   = np.maximum(SNES_likely_arr, SNES_maybe_arr)
 
 ECNES_raw = xr.open_dataarray(
     f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES.nc', chunks={'species': 50, 'presence': 1}
 )
 ECNES_likely_arr = ECNES_raw.sel(presence='LIKELY').astype(np.float32)
-ECNES_lm_arr     = ECNES_raw.sel(presence='MAYBE').astype(np.float32)
+ECNES_maybe_arr    = ECNES_raw.sel(presence='MAYBE').astype(np.float32)
+ECNES_likely_and_maybe = np.maximum(ECNES_likely_arr, ECNES_maybe_arr)
 
 # Metadata (loaded once, reused by NRM and IBRA outputs)
 SNES_meta = pd.read_csv(f'{SNES_ECNES_dir}/Processed/DCCEEW_SNES_meta.csv')
@@ -334,7 +334,7 @@ ECNES_meta_att = (
 ###############################################################################################
 
 snes_tasks = []
-for presence, arr_xr in [('LIKELY', SNES_likely_arr), ('MAYBE', SNES_lm_arr)]:
+for presence, arr_xr in [('LIKELY', SNES_likely_arr), ('LIKELY_AND_MAYBE', SNES_likely_and_maybe)]:
     arr_c = arr_xr.compute()
     for species in arr_c.coords['species'].values:
         species_arr = arr_c.sel(species=species).values
@@ -360,7 +360,7 @@ for df in tqdm(Parallel(n_jobs=N_JOBS, prefer='threads', return_as='generator_un
 ###############################################################################################
 
 ecnes_tasks = []
-for presence, arr_xr in [('LIKELY', ECNES_likely_arr), ('MAYBE', ECNES_lm_arr)]:
+for presence, arr_xr in [('LIKELY', ECNES_likely_arr), ('LIKELY_AND_MAYBE', ECNES_likely_and_maybe)]:
     arr_c = arr_xr.compute()
     for species in arr_c.coords['species'].values:
         species_arr = arr_c.sel(species=species).values
@@ -401,7 +401,7 @@ def assemble_df(raw: pd.DataFrame, name_col: str, meta_att: pd.DataFrame) -> pd.
 snes_all  = assemble_df(snes_raw,  'SCIENTIFIC_NAME', SNES_meta_att)
 ecnes_all = assemble_df(ecnes_raw, 'COMMUNITY',       ECNES_meta_att)
 
-# NRM region targets (both LIKELY and MAYBE)
+# NRM region targets (both LIKELY and LIKELY_AND_MAYBE)
 for df, key_col, region_lists in [
     (snes_all,  'SCIENTIFIC_NAME', [('North East', NECMA_SNES),  ('Goulburn Broken', GBCMA_SNES)]),
     (ecnes_all, 'COMMUNITY',       [('North East', NECMA_ECNES), ('Goulburn Broken', GBCMA_ECNES)]),
