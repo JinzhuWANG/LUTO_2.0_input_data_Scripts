@@ -8,7 +8,7 @@ Computes national-level biodiversity area-weighted scores for three data types:
 2. **SNES** — threatened species (DCCEEW Species of National Environmental Significance)
 3. **ECNES** — threatened ecological communities
 
-For each data type, outputs a processed NetCDF (for use in LUTO's biodiversity constraint) and a target CSV (for setting GBF3/GBF4 conservation targets). Script 5_2 reads these outputs and decomposes them by NRM and IBRA regions.
+For each data type, outputs a processed NetCDF (for use in LUTO's biodiversity constraint) and a target CSV (for setting GBF3/GBF4 conservation targets). Script 5_2 reads these outputs and decomposes them by NRM and IBRA regions; script 5_3 reads the weighted SNES/ECNES NetCDFs and runs the Zonation spatial prioritisation.
 
 ---
 
@@ -38,7 +38,7 @@ Used **only** when building `bio_DCCEEW_SNES_weighted.nc` and `bio_DCCEEW_ECNES_
 SNES_likely_and_maybe = np.maximum(SNES_likely * 0.8, SNES_maybe * 0.3)
 ```
 
-**These weights are never applied when computing area-weighted scores.** The weighted NetCDF files are only consumed by the Zonation workflow. Script 5_2 reads the raw `bio_DCCEEW_SNES.nc` file, not the weighted one.
+**These weights are never applied when computing area-weighted scores.** The weighted NetCDF files are only consumed by the Zonation workflow, which lives in script 5_3 — this script writes them and stops. Script 5_2 reads the raw `bio_DCCEEW_SNES.nc` file, not the weighted one.
 
 ---
 

@@ -21,10 +21,17 @@ Scripts must be run in order. Later scripts depend on outputs from earlier ones.
 | `script_5_0_SNES_ECNES_selected.py` | SNES/ECNES target species lists | imported by script 5_2 |
 | `script_5_1_assemble_biodiversity_data.py` | Biodiversity scores (national) | NVIS `.nc`, SNES/ECNES `.nc` + target CSVs |
 | `script_5_2_get_NVIS_SNES_ECNES_targets_by_regions.py` | Biodiversity scores (regional) | NRM/IBRA target Excel/CSV files |
+| `script_5_3_get_Zonation_layers.py` | Zonation spatial prioritisation | `bio_NES_Zonation.nc`, NES `rankmap.tif`s |
+| `script_5_4_get_Zonation_performance_curves.py` | Zonation rank-to-area curves | `Biodiversity_conserve_performance.xlsx` |
 | `script_6_water_yield_modelling.py` | Water yield | Appended into `cell_biophysical_df.h5` |
 | `script_7_assemble_additional_land_use_sieve_data.py` | Land use constraints | `cell_lu_sieve_df.pkl` |
 | `script_8_assemble_ag_yield_gap_data.py` | Yield gap | `SA2_yield_gap_mult.h5` |
 | `script_9_reforestation_carbon_data.py` | Carbon sequestration | `tCO2_ha_*.nc` NetCDF files |
+| `script_10_1_REM_get_tables_inputs.py` | Renewable energy tables | `renewable_*.csv`, REZ boundary shapefile |
+| `script_10_2_REM_get_existing_capacity.py` | Existing wind/solar plants | `renewable_existing_capacity_*.nc` |
+| `script_10_3_REM_get_align_input_layers.py` | Renewable rasters → LUTO grid | `renewable_energy_layers_{1D,2D}.nc` |
+
+The script 10 series (renewable energy, "REM") was ported from `N:/Data-Master/Renewable Energy/code`. It reads from and writes to `N:/Data-Master/Renewable Energy/`, not the LUTO input-data directories, and uses `National_Landuse_Map/lumap.tif` as its spatial template rather than the NLUM mask used by scripts 1–9.
 
 ## Spatial Framework
 
@@ -42,6 +49,16 @@ Most scripts define:
 - `conv_1D_to_2D(arr)` — places a 1D cell array back into the 2D NLUM grid for plotting
 - `map_in_2D(arr, title)` — quick matplotlib visualisation of spatial data
 - `downcast(df)` — reduces int64/float64 columns to smallest fitting dtype (memory optimisation)
+
+## Shared helpers — `tools/`
+
+Reusable functions live in the `tools/` package next to the scripts. Import as `from tools.raster import reproject_and_fill` — this resolves as long as the working directory is `Scripts/`, the same assumption `script_5_0` already relies on.
+
+`tools/raster.py`:
+- `fill_with_nearest(data_2d, to_fill=0)` — nearest-neighbour gap fill via `scipy.ndimage.distance_transform_edt`. Treats **both NaN and `to_fill` as gaps**, so the default overwrites meaningful zeros. To fill only NaN, pass a sentinel that cannot occur in the data (e.g. `to_fill=-1` on a 0–100 layer). **Mutates its argument in place** and also returns it.
+- `reproject_and_fill(raw_raster, template, mask, to_fill=0, resampling=Resampling.nearest)` — `reproject_match` onto a template, then `fill_with_nearest`, then mask to valid cells. Expects `raw_raster` to still carry a `band` dimension, and a boolean `mask`.
+
+Used by `script_5_3_get_Zonation_layers.py` (RHI, with `to_fill=-1`) and `script_10_3_REM_get_align_input_layers.py` (default fill).
 
 ## Output Directories
 

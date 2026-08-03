@@ -1,6 +1,5 @@
 
 import os, re
-import subprocess
 from matplotlib.table import Cell
 import netCDF4 # necessary for xarray to read/write netCDF files
 import rasterio, fiona
@@ -9,6 +8,7 @@ import rioxarray as rxr
 import numpy as np
 import pandas as pd
 import geopandas as gpd
+import sparse
 
 from glob import glob
 from itertools import product
@@ -718,6 +718,15 @@ SNES_arr.to_netcdf(
     engine='h5netcdf'
 )
 
+# Save sparse COO version — SNES is 99.65% sparse; COO ~1.5 GB vs 112 GB dense.
+# Workers in write_biodiversity_GBF4_SNES_scores load this instead of the NC to
+# avoid netCDF4 thread-safety issues and to keep RAM manageable.
+SNES_sparse = sparse.COO.from_numpy(SNES_arr.values)
+sparse.save_npz(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES_sparse.npz', SNES_sparse)
+print(f"SNES sparse saved: {SNES_sparse.nnz:,} nonzero  "
+      f"({100*SNES_sparse.nnz/SNES_sparse.size:.3f}% dense)  "
+      f"shape={SNES_sparse.shape}")
+
 
 # Combine LIKELY and MAYBE into a single weighted layer:
 SNES_likely = SNES_arr.sel(presence='LIKELY') * bio_presence_weight['LIKELY']
@@ -788,6 +797,13 @@ ECNES_arr.to_netcdf(
     engine='h5netcdf'
 )
 
+# Save sparse COO version — ECNES is 99.61% sparse; COO ~88 MB vs 5.6 GB dense.
+ECNES_sparse = sparse.COO.from_numpy(ECNES_arr.values)
+sparse.save_npz(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES_sparse.npz', ECNES_sparse)
+print(f"ECNES sparse saved: {ECNES_sparse.nnz:,} nonzero  "
+      f"({100*ECNES_sparse.nnz/ECNES_sparse.size:.3f}% dense)  "
+      f"shape={ECNES_sparse.shape}")
+
 
 
 # Combine LIKELY and MAYBE into a single weighted layer:
@@ -826,292 +842,12 @@ ECNES_arr_weighted.to_netcdf(
 
 
 
-# ------------------- Apply Zonation algorithm to merged data ------------------------------------------
-
-# Define the path to the Zonation executable
-zonation_exe = 'C:/Program Files (x86)/Zonation5/z5.exe'
-
-# Save weighted SNES and ECNES data to GeoTIFFs for Zonation input
-SNES_arr_weighted = xr.open_dataarray(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_SNES_weighted.nc', chunks={})
-ECNES_arr_weighted = xr.open_dataarray(f'{SNES_ECNES_dir}/Processed/bio_DCCEEW_ECNES_weighted.nc', chunks={})
-
-xy = np.nonzero(NLUM.values)
-def _save_weighted_tif(data_array, species, presence, out_dir, subdir, meta):
-    arr_2D = np.full((meta['height'], meta['width']), np.nan, dtype=np.float32)
-    arr_2D[xy] = data_array.sel(species=species, presence=presence).values
-    safe_name = re.sub(r'[^a-zA-Z0-9]', '_', species)
-    save_path = f'{out_dir}/Processed/SNES_ECNES_WEIGHTED/{subdir}/{safe_name}_{presence}.tif'
-    with rasterio.open(save_path, 'w', **meta) as dst:
-        dst.write(arr_2D, 1)
-
-_weighted_tasks = [
-    delayed(_save_weighted_tif)(da, species, presence, SNES_ECNES_dir, subdir, ref_meta_float)
-    for da, subdir in ((SNES_arr_weighted, 'SNES'), (ECNES_arr_weighted, 'ECNES'))
-    for species, presence in product(da['species'].values, da['presence'].values)
-]
-
-for _ in tqdm(Parallel(n_jobs=-1, return_as='generator')(_weighted_tasks), total=len(_weighted_tasks)):
-    pass
-
-
-
-# Collect the TIF paths for the LIKELY and MAYBE layers for SNES and ECNES, and save to txt files for Zonation input
-snes_likely_tifs =      glob(f'{SNES_ECNES_dir}/Processed/SNES_ECNES_WEIGHTED/SNES/*_LIKELY.tif')
-ecnes_likely_tifs =     glob(f'{SNES_ECNES_dir}/Processed/SNES_ECNES_WEIGHTED/ECNES/*_LIKELY.tif')
-snes_likely_may_tifs =  glob(f'{SNES_ECNES_dir}/Processed/SNES_ECNES_WEIGHTED/SNES/*_LIKELY_AND_MAYBE.tif')
-ecnes_likely_may_tifs = glob(f'{SNES_ECNES_dir}/Processed/SNES_ECNES_WEIGHTED/ECNES/*_LIKELY_AND_MAYBE.tif')
-mnes_likely_tifs = snes_likely_tifs + ecnes_likely_tifs
-mnes_likely_may_tifs = snes_likely_may_tifs + ecnes_likely_may_tifs
-
-
-# Save the TIF path to txt files
-with open(f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_files.txt', 'w') as f_snes_likely,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_files.txt', 'w') as f_ecnes_likely,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_may_files.txt', 'w') as f_snes_likely_may,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_files.txt', 'w') as f_ecnes_likely_may,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_files.txt', 'w') as f_mnes_likely,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_may_files.txt', 'w') as f_mnes_likely_may:
-         
-    f_snes_likely.write('filename\n')
-    f_snes_likely.write('\n'.join(f'"{p}"' for p in snes_likely_tifs))
-    f_ecnes_likely.write('filename\n')
-    f_ecnes_likely.write('\n'.join(f'"{p}"' for p in ecnes_likely_tifs))
-    f_snes_likely_may.write('filename\n')
-    f_snes_likely_may.write('\n'.join(f'"{p}"' for p in snes_likely_may_tifs))
-    f_ecnes_likely_may.write('filename\n')
-    f_ecnes_likely_may.write('\n'.join(f'"{p}"' for p in ecnes_likely_may_tifs))
-    f_mnes_likely.write('filename\n')
-    f_mnes_likely.write('\n'.join(f'"{p}"' for p in mnes_likely_tifs))
-    f_mnes_likely_may.write('filename\n')
-    f_mnes_likely_may.write('\n'.join(f'"{p}"' for p in mnes_likely_may_tifs))
-    
-    
-# Create mask and hierarchy TIF
-with rasterio.open(snes_likely_may_tifs[0]) as src:
-    meta = src.meta.copy()
-    meta.update({
-        'dtype': 'uint8',
-        'nodata': 0,
-        'compress': 'lzw',
-        'count': 1,
-        'width': NLUM.rio.width,
-        'height': NLUM.rio.height,
-        'transform': NLUM.rio.transform(),
-    })
-    
-    zone_mask = NLUM.values.astype('uint8')
-    zone_hierarchy = ((zone_mask == 1) * (idx_in_LUTO_2D == 0)).astype('uint8')
-    
-    with rasterio.open(f'{SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif', 'w', **meta) as zone_hierarchy_dst,\
-         rasterio.open(f'{SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif', 'w', **meta) as zone_mask_dst:
-        zone_hierarchy_dst.write(zone_hierarchy, 1)
-        zone_mask_dst.write(zone_mask, 1)
-
-
-# Create the zonation settings file
-with open(f'{SNES_ECNES_dir}/Processed/Zonation/snes_likely_settings.txt', 'w') as snes_likely_settings,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_likely_settings.txt', 'w') as ecnes_likely_settings,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/snes_likely_may_settings.txt', 'w') as snes_likely_may_settings,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/ecnes_likely_may_settings.txt', 'w') as ecnes_likely_may_settings,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/mnes_likely_settings.txt', 'w') as mnes_likely_settings,\
-     open(f'{SNES_ECNES_dir}/Processed/Zonation/mnes_likely_may_settings.txt', 'w') as mnes_likely_may_settings:
-         
-    snes_likely_settings.write((
-        f'feature list file = {SNES_ECNES_dir}/Processed/Zonation/SNES_likely_files.txt\n'
-        f'analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif\n'
-        f'hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif\n'
-    ))
-    
-    ecnes_likely_settings.write((
-        f'feature list file = {SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_files.txt\n'
-        f'analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif\n'
-        f'hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif\n'
-    ))
-
-    snes_likely_may_settings.write((
-        f'feature list file = {SNES_ECNES_dir}/Processed/Zonation/SNES_likely_may_files.txt\n'
-        f'analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif\n'
-        f'hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif\n'
-    ))
-
-    ecnes_likely_may_settings.write((
-        f'feature list file = {SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_files.txt\n'
-        f'analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif\n'
-        f'hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif\n'
-    ))
-
-    mnes_likely_settings.write((
-        f'feature list file = {SNES_ECNES_dir}/Processed/Zonation/MNES_likely_files.txt\n'
-        f'analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif\n'
-        f'hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif\n'
-    ))
-
-    mnes_likely_may_settings.write((
-        f'feature list file = {SNES_ECNES_dir}/Processed/Zonation/MNES_likely_may_files.txt\n'
-        f'analysis area mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_mask.tif\n'
-        f'hierarchic mask layer = {SNES_ECNES_dir}/Processed/Zonation/zone_hierarchy.tif\n'
-    ))
-
-  
-
-# Execute zonation in parallel
-zonation_runs = [
-    ('snes_likely_settings.txt',     'SNES_likely_Priority'),
-    ('ecnes_likely_settings.txt',    'ECNES_likely_Priority'),
-    ('snes_likely_may_settings.txt', 'SNES_likely_may_Priority'),
-    ('ecnes_likely_may_settings.txt','ECNES_likely_may_Priority'),
-    ('mnes_likely_settings.txt',     'MNES_likely_Priority'),
-    ('mnes_likely_may_settings.txt', 'MNES_likely_may_Priority'),
-]
-
-zonation_procs = [
-    subprocess.Popen([
-        zonation_exe, '--mode=CAZMAX', '-ah',
-        f'{SNES_ECNES_dir}/Processed/Zonation/{settings}',
-        f'{SNES_ECNES_dir}/Processed/Zonation/{output}'
-    ]) for settings, output in zonation_runs
-]
-
-for proc, (settings, _) in zip(zonation_procs, zonation_runs):
-    rc = proc.wait()
-    if rc != 0:
-        print(f'WARNING: Zonation failed for {settings} (exit code {rc})')
-
-
-# Merge all zonation layers and save as NetCDF
-zonation_layers = {
-    'ECNES_likely_may': f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_may_Priority/rankmap.tif',
-    'ECNES_likely': f'{SNES_ECNES_dir}/Processed/Zonation/ECNES_likely_Priority/rankmap.tif',
-    'SNES_likely_may': f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_may_Priority/rankmap.tif',
-    'SNES_likely': f'{SNES_ECNES_dir}/Processed/Zonation/SNES_likely_Priority/rankmap.tif',
-    'MNES_likely_may': f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_may_Priority/rankmap.tif',
-    'MNES_likely': f'{SNES_ECNES_dir}/Processed/Zonation/MNES_likely_Priority/rankmap.tif',
-}
-
-zonation_arr = xr.DataArray(
-    np.zeros((len(zonation_layers), NLUM.sum().item()), dtype=np.float32),
-    dims=['layer', 'cell'],
-    coords={'layer':list(zonation_layers.keys()), 'cell':np.arange(NLUM.sum().item())}
-)
-
-for layer, path in zonation_layers.items():
-    with rasterio.open(path) as src:
-        arr = src.read(1)
-        arr = arr[np.nonzero(NLUM.values)]
-        zonation_arr.loc[dict(layer=layer)] = arr
-    
-
-# Save to nc
-zonation_arr.name = 'data'
-zonation_arr.to_netcdf(
-    f'{SNES_ECNES_dir}/Processed/bio_NES_Zonation.nc',
-    mode='w', 
-    encoding={'data': {
-        "compression": "gzip", 
-        "compression_opts": 5,
-        "dtype": 'float32'
-        },
-    },
-    engine='h5netcdf'
-)
-
-
-
-###############################################################################################
-#                  Process Speciese Conservation Priority data (GBF2) with Xarray             #
-###############################################################################################
-
-
-# ----------------- Calculate the rank2area performance curves for conservation priority data -----------------
-
-Biodiversity_conserve_performance = pd.DataFrame()
-
-# Get conservation priority raster/csv
-for ssp in ['ssp126', 'ssp245', 'ssp370', 'ssp585']:
-    
-    # Read the conservation priority data, select the cells of 'inside LUTO study area'
-    ly = rxr.open_rasterio(f'{bio_Carla_EnviroSuit_dir}/Zonation/{ssp}/{ssp}_zonation_rank_1km.tif'
-        ).squeeze('band'
-        ).drop_vars('band'
-        ).sel(
-            x=xr.DataArray(zones['X'].values, dims='cell', coords={'cell':zones.index}), 
-            y=xr.DataArray(zones['Y'].values, dims='cell', coords={'cell':zones.index}), 
-            method='nearest', 
-            drop=True
-        ).assign_coords(area=('cell', real_area_ha)
-        ).drop_vars(['x', 'y', 'spatial_ref'])
-
-    # Select cells inside LUTO study area, calculate the conservation priority statistics
-    ly_stats = ly.sel(cell=idx_in_LUTO
-        ).to_dataframe(name='PRIORITY_RANK'
-        ).reset_index(
-        ).sort_values('PRIORITY_RANK', ascending=False
-        ).assign(
-            AREA_COVERAGE_PERCENT=(
-                lambda df: 
-                    df['area'].astype("float").cumsum()     # Needs to convert cumsum to float to avoid numerical issues
-                    / df['area'].sum() 
-                    * 100
-                ),              
-            PRIORITY_RANK_CUMSUM_CONTRIBUTION=(
-                lambda df: 
-                    (df['PRIORITY_RANK'].astype("float") * df['area']).cumsum() 
-                    / (df['PRIORITY_RANK'] * df['area']).sum() * 100
-                ),
-            source=ssp
-        ).drop(columns=['area', 'cell'])
-    
-    # Select rows with AREA_COVERAGE_PERCENT closest to integer values from 0 to 100
-    ly_stats = ly_stats.iloc[
-        abs(np.arange(101).reshape(-1, 1)  - ly_stats['AREA_COVERAGE_PERCENT'].values).argmin(axis=1)].copy()
-    ly_stats['AREA_COVERAGE_PERCENT'] = np.arange(101)
-    
-    # Save the conservation priority data to the array
-    Biodiversity_conserve_performance = pd.concat([Biodiversity_conserve_performance, ly_stats])
-    
-    
-# Get conservation priority raster/csv
-for nes in ['ECNES_likely_may', 'ECNES_likely', 'SNES_likely_may', 'SNES_likely', 'MNES_likely_may', 'MNES_likely' ]:
-    
-    ly = rxr.open_rasterio(f'{SNES_ECNES_dir}/Processed/Zonation/{nes}_Priority/rankmap.tif'
-        ).squeeze('band'
-        ).drop_vars('band'
-        ).sel(
-            x=xr.DataArray(zones['X'].values, dims='cell', coords={'cell':zones.index}), 
-            y=xr.DataArray(zones['Y'].values, dims='cell', coords={'cell':zones.index}),
-            method='nearest', 
-            drop=True 
-        ).assign_coords(area=('cell', real_area_ha)
-        ).drop_vars(['x', 'y', 'spatial_ref'])
-    ly_stats = ly.sel(cell=idx_in_LUTO
-        ).to_dataframe(name='PRIORITY_RANK'
-        ).reset_index(
-        ).sort_values('PRIORITY_RANK', ascending=False
-        ).assign(
-            AREA_COVERAGE_PERCENT=(
-                lambda df: 
-                    df['area'].astype("float").cumsum()     # Needs to convert cumsum to float to avoid numerical issues
-                    / df['area'].sum() 
-                    * 100
-                ),              
-            PRIORITY_RANK_CUMSUM_CONTRIBUTION=(
-                lambda df: 
-                    (df['PRIORITY_RANK'].astype("float") * df['area']).cumsum() 
-                    / (df['PRIORITY_RANK'] * df['area']).sum() * 100
-                ),
-            source=nes
-        ).drop(columns=['area', 'cell'])
-    ly_stats = ly_stats.iloc[
-        abs(np.arange(101).reshape(-1, 1) - ly_stats['AREA_COVERAGE_PERCENT'].values).argmin(axis=1)].copy()
-    ly_stats['AREA_COVERAGE_PERCENT'] = np.arange(101)
-    Biodiversity_conserve_performance = pd.concat([Biodiversity_conserve_performance, ly_stats])
-
-
-# Save csv to Excel
-with pd.ExcelWriter(f'{SNES_ECNES_dir}/Processed/Biodiversity_conserve_performance.xlsx') as writer:
-    for source, df in Biodiversity_conserve_performance.groupby('source'):
-        df = df[['AREA_COVERAGE_PERCENT', 'PRIORITY_RANK', 'PRIORITY_RANK_CUMSUM_CONTRIBUTION']]
-        df.to_excel(writer, sheet_name=source, index=False)
+# Zonation processing moved downstream, and nothing below depends on it:
+#   script_5_3_get_Zonation_layers.py            consumes the weighted NetCDFs written above
+#                                                (bio_DCCEEW_{SNES,ECNES}_weighted.nc), runs
+#                                                Zonation 5, writes the rankmaps + bio_NES_Zonation.nc
+#   script_5_4_get_Zonation_performance_curves.py reads those rankmaps (and script 4's SSP rank
+#                                                layers) to write Biodiversity_conserve_performance.xlsx
 
 
 
@@ -1255,13 +991,21 @@ for gdb_path, layer_raster, layer_attribute in files:
     save_path = f'{NVIS_SAVE_path}/{output_layer_name}.nc'
     dst_array_xr.name = 'data'
     dst_array_xr.to_netcdf(save_path, encoding=encoding, engine='h5netcdf')
+
+    # Save sparse COO version — NVIS is ~95% sparse; used by write.py threads.
+    # Dense is ~0.8 GB so COO.from_numpy is safe here (no per-slice loop needed).
+    nvis_sparse = sparse.COO.from_numpy(dst_array_xr.values)
+    sparse.save_npz(f'{NVIS_SAVE_path}/{output_layer_name}_sparse.npz', nvis_sparse)
+    # Save group coordinate names alongside so data.py can reconstruct xarray without the NC.
+    np.save(f'{NVIS_SAVE_path}/{output_layer_name}_groups.npy', dst_array_xr.coords['group'].values)
+    print(f"{output_layer_name} sparse: {nvis_sparse.nnz:,} nonzero  "
+          f"({100*nvis_sparse.nnz/nvis_sparse.size:.2f}% dense)  "
+          f"shape={nvis_sparse.shape}")
     
 
 
 
-# NVIS area-weighted score calculation removed — script_5_2 computes Australia-level
-# and all regional scores from NVIS7_0_AUST_PRE_MVG.nc / NVIS7_0_AUST_PRE_MVS.nc
-# using compute_region_scores().
+
 
 
 
