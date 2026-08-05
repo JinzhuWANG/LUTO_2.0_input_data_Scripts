@@ -4,4 +4,4 @@
 .spyproject/**
 __pycache__/
 .claude/settings.local.json
-work_in_progress/*
+jinzhu_inspect

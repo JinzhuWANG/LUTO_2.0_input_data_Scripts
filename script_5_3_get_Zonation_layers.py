@@ -294,6 +294,8 @@ RHI_ly = rxr.open_rasterio(RHI_path)
 # neighbour's rank. Keeping them at 0 means no cell carries a rank DCCEEW did not assign it.
 RHI_match = reproject_and_fill(RHI_ly, NLUM, NLUM.astype(bool), to_fill=-1, resampling=Resampling.nearest)
 
+RHI_match.rio.to_raster(f'{RHI_dir}/bio_DCCEEW_RHI.tif', compress='lzw', dtype='float32', nodata=np.nan)
+
 RHI_arr = xr.DataArray(
     RHI_match.values[np.nonzero(NLUM.values)].astype(np.float32),
     dims=['cell'],
