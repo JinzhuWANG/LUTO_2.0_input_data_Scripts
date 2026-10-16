@@ -136,17 +136,20 @@ ep_belt_array = ep_belt_array.data[np.nonzero(NLUM_mask)].transpose(1, 2, 0)
 ep_block_array = (1 - rip_area_prop) * ep_block_array + rip_area_prop * ep_rip_array
 
 # Cap total carbon per hectare and convert to total CO2e per cell
-ep_block_array[:, 0, :] = np.where(ep_block_array[:, 0, :] > max_tree_C, max_tree_C, ep_block_array[:, 0, :]) * 44 / 12 
-ep_block_array[:, 1, :] = np.where(ep_block_array[:, 1, :] > max_debris_C, max_debris_C, ep_block_array[:, 1, :]) * 44 / 12 
-ep_block_array[:, 2, :] = np.where(ep_block_array[:, 2, :] > max_soil_C, max_soil_C, ep_block_array[:, 2, :]) * 44 / 12 
+#   NOTE: axis 1 follows the source NetCDF VARIABLE coord, which is
+#   ['DEBRIS_C_HA', 'SOIL_C_HA', 'TREE_C_HA'] -- index 0 is DEBRIS, 1 is SOIL,
+#   2 is TREES. Keep each cap paired with its own pool.
+ep_block_array[:, 0, :] = np.where(ep_block_array[:, 0, :] > max_debris_C, max_debris_C, ep_block_array[:, 0, :]) * 44 / 12 
+ep_block_array[:, 1, :] = np.where(ep_block_array[:, 1, :] > max_soil_C, max_soil_C, ep_block_array[:, 1, :]) * 44 / 12 
+ep_block_array[:, 2, :] = np.where(ep_block_array[:, 2, :] > max_tree_C, max_tree_C, ep_block_array[:, 2, :]) * 44 / 12 
 
-ep_rip_array[:, 0, :] = np.where(ep_rip_array[:, 0, :] > max_tree_C, max_tree_C, ep_rip_array[:, 0, :]) * 44 / 12 
-ep_rip_array[:, 1, :] = np.where(ep_rip_array[:, 1, :] > max_debris_C, max_debris_C, ep_rip_array[:, 1, :]) * 44 / 12 
-ep_rip_array[:, 2, :] = np.where(ep_rip_array[:, 2, :] > max_soil_C, max_soil_C, ep_rip_array[:, 2, :]) * 44 / 12 
+ep_rip_array[:, 0, :] = np.where(ep_rip_array[:, 0, :] > max_debris_C, max_debris_C, ep_rip_array[:, 0, :]) * 44 / 12 
+ep_rip_array[:, 1, :] = np.where(ep_rip_array[:, 1, :] > max_soil_C, max_soil_C, ep_rip_array[:, 1, :]) * 44 / 12 
+ep_rip_array[:, 2, :] = np.where(ep_rip_array[:, 2, :] > max_tree_C, max_tree_C, ep_rip_array[:, 2, :]) * 44 / 12 
 
-ep_belt_array[:, 0, :] = np.where(ep_belt_array[:, 0, :] > max_tree_C, max_tree_C, ep_belt_array[:, 0, :]) * 44 / 12 
-ep_belt_array[:, 1, :] = np.where(ep_belt_array[:, 1, :] > max_debris_C, max_debris_C, ep_belt_array[:, 1, :]) * 44 / 12 
-ep_belt_array[:, 2, :] = np.where(ep_belt_array[:, 2, :] > max_soil_C, max_soil_C, ep_belt_array[:, 2, :]) * 44 / 12 
+ep_belt_array[:, 0, :] = np.where(ep_belt_array[:, 0, :] > max_debris_C, max_debris_C, ep_belt_array[:, 0, :]) * 44 / 12 
+ep_belt_array[:, 1, :] = np.where(ep_belt_array[:, 1, :] > max_soil_C, max_soil_C, ep_belt_array[:, 1, :]) * 44 / 12 
+ep_belt_array[:, 2, :] = np.where(ep_belt_array[:, 2, :] > max_tree_C, max_tree_C, ep_belt_array[:, 2, :]) * 44 / 12 
 
 
 # Export to NetCDF
@@ -237,13 +240,16 @@ cp_block_array = (1 - p) * mal_block_array + p * eglob_block_array
 cp_belt_array = (1 - p) * mal_belt_array + p * eglob_belt_array
 
 # Cap total carbon per hectare and convert to total CO2e per cell
-cp_block_array[:, 0, :] = np.where(cp_block_array[:, 0, :] > max_tree_C, max_tree_C, cp_block_array[:, 0, :]) * 44 / 12 
-cp_block_array[:, 1, :] = np.where(cp_block_array[:, 1, :] > max_debris_C, max_debris_C, cp_block_array[:, 1, :]) * 44 / 12 
-cp_block_array[:, 2, :] = np.where(cp_block_array[:, 2, :] > max_soil_C, max_soil_C, cp_block_array[:, 2, :]) * 44 / 12 
+#   NOTE: axis 1 follows the source NetCDF VARIABLE coord, which is
+#   ['DEBRIS_C_HA', 'SOIL_C_HA', 'TREE_C_HA'] -- index 0 is DEBRIS, 1 is SOIL,
+#   2 is TREES. Keep each cap paired with its own pool.
+cp_block_array[:, 0, :] = np.where(cp_block_array[:, 0, :] > max_debris_C, max_debris_C, cp_block_array[:, 0, :]) * 44 / 12 
+cp_block_array[:, 1, :] = np.where(cp_block_array[:, 1, :] > max_soil_C, max_soil_C, cp_block_array[:, 1, :]) * 44 / 12 
+cp_block_array[:, 2, :] = np.where(cp_block_array[:, 2, :] > max_tree_C, max_tree_C, cp_block_array[:, 2, :]) * 44 / 12 
 
-cp_belt_array[:, 0, :] = np.where(cp_belt_array[:, 0, :] > max_tree_C, max_tree_C, cp_belt_array[:, 0, :]) * 44 / 12 
-cp_belt_array[:, 1, :] = np.where(cp_belt_array[:, 1, :] > max_debris_C, max_debris_C, cp_belt_array[:, 1, :]) * 44 / 12 
-cp_belt_array[:, 2, :] = np.where(cp_belt_array[:, 2, :] > max_soil_C, max_soil_C, cp_belt_array[:, 2, :]) * 44 / 12 
+cp_belt_array[:, 0, :] = np.where(cp_belt_array[:, 0, :] > max_debris_C, max_debris_C, cp_belt_array[:, 0, :]) * 44 / 12 
+cp_belt_array[:, 1, :] = np.where(cp_belt_array[:, 1, :] > max_soil_C, max_soil_C, cp_belt_array[:, 1, :]) * 44 / 12 
+cp_belt_array[:, 2, :] = np.where(cp_belt_array[:, 2, :] > max_tree_C, max_tree_C, cp_belt_array[:, 2, :]) * 44 / 12 
 
 # Export to NetCDF
 co2e_CP_block = xr.Dataset({
