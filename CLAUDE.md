@@ -6,7 +6,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 Sequential data processing pipeline that assembles all input data for LUTO 2.0 (Land Use Trade-Offs model). Scripts process geospatial, agricultural, biodiversity, and biophysical data for land use modelling across Australia at 1 km resolution (~7 million cells).
 
-Individual script documentation is in the `CLAUDE/` directory — read the relevant file before modifying any script.
+Individual script documentation is in the `CLAUDE/` directory — read the relevant file before modifying any script. `CLAUDE/NLUM_reference_grid.md` is cross-cutting rather than per-script: it documents the shared spatial reference frame and its provenance.
 
 ## Pipeline Execution Order
 
@@ -35,10 +35,10 @@ The script 10 series (renewable energy, "REM") was ported from `N:/Data-Master/R
 
 ## Spatial Framework
 
-All scripts share a consistent spatial framework:
+All scripts share a consistent spatial framework. Full provenance in `CLAUDE/NLUM_reference_grid.md`.
 
 - **NLUM mask**: `N:/Data-Master/National_Landuse_Map/NLUM_2010-11_mask.tif`  
-  The 1 km raster mask of Australia. Non-zero pixels define the study area (~7 M cells).
+  The 1 km raster mask of Australia. Non-zero pixels define the study area: 4071 × 3364 at 0.01° in GDA94 (EPSG:4283), 6,956,407 valid cells. Both the grid and the footprint are inherited unchanged from ABARES *Land Use of Australia 2010-11*; do not regenerate them.
 - **Cell dataframe**: produced by script 1, used by all others.  
   Path: `N:/Data-Master/LUTO_2.0_input_data/Input_data/2D_Spatial_Snapshot/cell_zones_df.h5`
 - **1D ↔ 2D convention**: `NLUM.values` gives a 2D boolean mask; `np.nonzero(NLUM.values)` gives the 1D cell index. All cell-level arrays are 1D with length = number of NLUM cells.
