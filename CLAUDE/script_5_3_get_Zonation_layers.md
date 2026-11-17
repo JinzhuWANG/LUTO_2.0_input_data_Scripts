@@ -54,7 +54,7 @@ These presence-uncertainty weights exist **only** for zonation. They are never a
 
 ## RHI (Relative Habitat Importance)
 
-A separate, much smaller section at the end. RHI is a **finished DCCEEW product** — they ran the Zonation 5 CAZMAX prioritisation over the SNES 'likely to occur' SDMs and published the ranked raster. No Zonation run happens here; the section only normalises it to the LUTO spatial format.
+A separate, much smaller section at the end. RHI is a **finished DCCEEW product** — they ran the Zonation 5 CAZMAX prioritisation over the SNES 'likely to occur' SDMs and published the ranked raster. No Zonation run happens here; the section only normalises it to the LUTO spatial format and divides its 0–100 ranks by 100, putting it on the 0–1 scale of the other quality layers (20261117).
 
 Source: `{RHI_dir}/Relative Habitat Importance/relative_habitat_importance.tif`
 `RHI_dir = N:/Data-Master/Biodiversity/DCCEEW/RHI (Relative Habitat Importance)`
@@ -63,11 +63,11 @@ Two decisions worth knowing, both driven by what the raster actually contains:
 
 - **`Resampling.nearest`, not bilinear.** RHI already matches NLUM's CRS (EPSG:4283) and 0.01° resolution, so this is not a rescale — but the grid origin is offset by a fraction of a cell (−0.35 in x, 0.46 in y), so `reproject_match` is still required. The values are a true uniform rank: percentiles 1/25/50/75/99 of the non-zero cells fall exactly on 1/25/50/75/99. Bilinear would blend neighbouring ranks into values that are no longer ranks.
 
-- **Zeros are preserved, via `to_fill=-1`.** Normalisation goes through `tools.raster.reproject_and_fill`, whose `fill_with_nearest` step treats `to_fill` as a gap alongside NaN. The default `to_fill=0` would overwrite the zeros; `-1` never occurs in a 0–100 rank layer, so the fill is a deliberate no-op.
+- **Zeros are preserved, via `to_fill=-1`.** Normalisation goes through `tools.raster.reproject_and_fill`, whose `fill_with_nearest` step treats `to_fill` as a gap alongside NaN. The default `to_fill=0` would overwrite the zeros; `-1` never occurs in a 0–100 rank layer, so the fill is a deliberate no-op. The /100 rescale comes after the fill, so zeros stay 0.
 
   This matters because DCCEEW uses 0 for "not ranked", not "lowest priority" — 78 704 NLUM cells (1.13%), mostly islands outside the GEODATA COAST 100K extent their analysis was clipped to. Filling them would hand those cells a rank DCCEEW never assigned, which would be wrong if RHI is ever used to *exclude* land rather than merely rank it.
 
-  Verified output: 6 956 407 cells, range 0–100, 78 704 zeros, no NaNs. Reprojection after `reproject_match` introduces no NaN at all, since RHI's bounding box fully contains NLUM's.
+  Verified output: 6 956 407 cells, range 0–1, 78 704 zeros, no NaNs. Reprojection after `reproject_match` introduces no NaN at all, since RHI's bounding box fully contains NLUM's.
 
 ---
 
@@ -76,7 +76,7 @@ Two decisions worth knowing, both driven by what the raster actually contains:
 | Path | Description |
 |---|---|
 | `{SNES_ECNES_dir}/Processed/bio_NES_Zonation.nc` | `(layer, cell)` float32; 6 layers |
-| `{RHI_dir}/bio_DCCEEW_RHI.nc` | `(cell,)` float32; ranks 1–100, ~30 MB |
+| `{RHI_dir}/bio_DCCEEW_RHI.nc` | `(cell,)` float32; ranks 0.01–1 (0 = not ranked), ~30 MB |
 | `{SNES_ECNES_dir}/Processed/Zonation/{layer}_Priority/rankmap.tif` | consumed by script 5_4 |
 | `{SNES_ECNES_dir}/Processed/SNES_ECNES_WEIGHTED/**/*.tif` | per-species zonation inputs |
 | `{SNES_ECNES_dir}/Processed/Zonation/*` | feature lists, settings, masks, and Zonation run directories |

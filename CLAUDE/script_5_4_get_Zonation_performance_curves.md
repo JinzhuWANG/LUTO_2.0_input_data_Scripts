@@ -43,7 +43,7 @@ The SSP and NES loops are identical apart from the raster path and the `source` 
 
 Read a row as: *to cover this percentage of in-LUTO area under this layer, threshold it at this `PRIORITY_RANK`.* The value is in whatever units the layer itself uses. LUTO consumes the layer and its sheet as a pair, so **no layer is rescaled to match any other** — cross-layer comparability of the `PRIORITY_RANK` column is not a goal, and chasing it would put the numbers on an invented scale.
 
-That is why RHI keeps its native 0–100. It skips step 1 (already a 1D cell array on the NLUM grid) and is otherwise handled exactly like the rasters. Its values rank each cell against all of Australia rather than against the study area, but the curve is built from in-LUTO cells only, so the rank reported at a given coverage is already the raw value that cuts the study area there — which is all LUTO needs to threshold on. Re-ranking within in-LUTO would select **exactly the same cells**, since ranking is monotonic; it would only change the units.
+RHI arrives already on 0–1 — script 5_3 divides DCCEEW's 0–100 ranks by 100 (20261117) to match the other layers' scale, not to make the `PRIORITY_RANK` columns comparable. It skips step 1 (already a 1D cell array on the NLUM grid) and is otherwise handled exactly like the rasters. Its values rank each cell against all of Australia rather than against the study area, but the curve is built from in-LUTO cells only, so the rank reported at a given coverage is already the value that cuts the study area there — which is all LUTO needs to threshold on. Re-ranking within in-LUTO would select **exactly the same cells**, since ranking is monotonic; it would only change the units.
 
 RHI is also re-emitted here as `bio_RHI_Zonation.nc`, matching the `bio_NES_Zonation.nc` name LUTO's dataprep copies. Same values as `bio_DCCEEW_RHI.nc` from script 5_3 — the point is that the layer LUTO reads and the `RHI` curve built from it always ship from one script, so they cannot drift onto different scales.
 
@@ -70,11 +70,11 @@ The NES rankmaps come from Zonation runs in script 5_3 that use a **hierarchic m
 |---|---|---|---|
 | `MNES_likely` / `SNES_likely` | 0.303 (= 0.606/2) | 0.803 (= (0.606+1)/2) | **100%** |
 | `ssp245` | 0.329 | 0.758 | 92.3% |
-| RHI, before re-rank | 52.3 | 46.2 | 42.1% |
+| RHI | 0.523 | 0.462 | 42.1% |
 
 RHI's 42.1% against a 39.4% base rate means **no LUTO conditioning at all** — DCCEEW ranked all of Australia with no knowledge of the study area. Its in-LUTO values are a truncated national ranking, not a within-LUTO one.
 
-This does not need correcting for the sheet's purpose. Thresholding RHI at the value its own sheet reports selects the right cells regardless of what scale those values sit on. It does mean the `PRIORITY_RANK` **column** is not comparable across sheets, and the `PRIORITY_RANK_CUMSUM_CONTRIBUTION` column shifts a little with the scale — RHI raw reads 18.3 / 42.2 / 73.6 at 10 / 25 / 50% coverage where a within-LUTO re-rank would read 19.1 / 43.9 / 75.1, a maximum of 2.0 pp across all 101 rows. Neither column changes *which* cells a given coverage selects.
+This does not need correcting for the sheet's purpose. Thresholding RHI at the value its own sheet reports selects the right cells regardless of what scale those values sit on. It does mean the `PRIORITY_RANK` **column** is not comparable across sheets, and the `PRIORITY_RANK_CUMSUM_CONTRIBUTION` column shifts a little with the ranking domain (the /100 rescale leaves it unchanged, being a ratio) — RHI as published reads 18.3 / 42.2 / 73.6 at 10 / 25 / 50% coverage where a within-LUTO re-rank would read 19.1 / 43.9 / 75.1, a maximum of 2.0 pp across all 101 rows. Neither column changes *which* cells a given coverage selects.
 
 **A deeper limit no rescaling can reach.** The hierarchic mask does not merely push outside-LUTO cells to the top — it makes Zonation's iterative removal treat them as already secured, so the in-LUTO ordering accounts for what is protected elsewhere. RHI arrives as a finished raster with no SDMs to re-run, so that complementarity conditioning is unrecoverable. Two layers can therefore agree on this curve while disagreeing about *which* cells are important; measured directly, RHI and `SNES_likely` correlate at 0.933 but their top deciles overlap at only Jaccard 0.646.
 
