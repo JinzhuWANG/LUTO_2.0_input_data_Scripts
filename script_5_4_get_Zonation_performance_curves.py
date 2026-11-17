@@ -59,8 +59,9 @@ Outputs:
                                                                         LUTO's dataprep copies
 
 Every sheet maps AREA_COVERAGE_PERCENT (of in-LUTO area) to the PRIORITY_RANK value that cuts the
-study area at that percentage, in whatever units its own layer uses. LUTO reads the layer and the
-sheet together, so no layer needs rescaling to match any other -- RHI stays on its native 0-100.
+study area at that percentage, in the units of its own layer. LUTO reads the layer and the sheet
+together. Every layer is a priority rank on 0-1: script 5_3 brings RHI from DCCEEW's 0-100 to 0-1
+(20261117), and its sheet follows because it is built here from that output.
 '''
 
 
@@ -152,10 +153,11 @@ for nes in ['ECNES_likely_may', 'ECNES_likely', 'SNES_likely_may', 'SNES_likely'
 # RHI is written by script 5_3 as a 1D cell array already on the NLUM grid, so unlike the rasters
 # above it needs no x/y sampling — the cell axis lines up with `zones` and `idx_in_LUTO` directly.
 #
-# Its raw 0-100 values are kept as they are. RHI is a finished national product, so those values rank
+# Its values are those of script 5_3: DCCEEW's ranks on the 0-1 scale of the other layers (0-100 divided
+# by 100 there, 20261117). RHI is a finished national product, so those values rank
 # each cell against all of Australia rather than against the study area, but the curve below is built
 # from in-LUTO cells only — so the PRIORITY_RANK it reports at a given AREA_COVERAGE_PERCENT is already
-# the raw value that cuts the study area at that percentage, which is all LUTO needs to threshold on.
+# the value that cuts the study area at that percentage, which is all LUTO needs to threshold on.
 # Re-ranking would select exactly the same cells (ranking is monotonic) while putting the layer and the
 # sheet on an invented scale, so it is left out.
 #

@@ -271,7 +271,10 @@ zonation_arr.to_netcdf(
 RHI is a finished product. DCCEEW has already run the Zonation 5 prioritisation (CAZMAX over the SNES
 'likely to occur' SDMs) and published the ranked 0-100 raster at 1 km. No Zonation run is needed here —
 this section only normalises that raster to the LUTO spatial format (NLUM extent, resolution and cell
-alignment).
+alignment) and to the 0-1 scale of the other quality layers.
+
+Scale (20261117): the other quality layers are ranks on 0-1, so RHI is divided by 100 here to match them.
+Re-run script 5_4 afterwards: it builds the 'RHI' performance curve from this output.
 
 Source:  https://fed.dcceew.gov.au/datasets/0732222780f84f9387975f26e0bc5af6/about
 Provided by Patrick @ ClimateWorks; saved by Jinzhu 20260803.
@@ -293,11 +296,12 @@ RHI_ly = rxr.open_rasterio(RHI_path)
 # 100K extent their analysis was clipped to — and the default to_fill=0 would overwrite those with a
 # neighbour's rank. Keeping them at 0 means no cell carries a rank DCCEEW did not assign it.
 RHI_match = reproject_and_fill(RHI_ly, NLUM, NLUM.astype(bool), to_fill=-1, resampling=Resampling.nearest)
+RHI_scaled = RHI_match / 100    # DCCEEW's 0-100 ranks -> 0-1, the scale of the other quality layers
 
-RHI_match.rio.to_raster(f'{RHI_dir}/bio_DCCEEW_RHI.tif', compress='lzw', dtype='float32', nodata=np.nan)
+RHI_scaled.rio.to_raster(f'{RHI_dir}/bio_DCCEEW_RHI.tif', compress='lzw', dtype='float32', nodata=np.nan)
 
 RHI_arr = xr.DataArray(
-    RHI_match.values[np.nonzero(NLUM.values)].astype(np.float32),
+    RHI_scaled.values[np.nonzero(NLUM.values)].astype(np.float32),
     dims=['cell'],
     coords={'cell': np.arange(NLUM.sum().item())}
 )
